@@ -1345,78 +1345,71 @@
       return group;
     }
 
-    function createStudentDeskAndChair(hasBooks = true, hasChair = true) {
-      const group = new THREE.Group();
-      const topWood = getProceduralPBRMaterial('wood', 0xd97706, 0.42, 0.05, 2);
-      const darkWood = getProceduralPBRMaterial('wood', 0x92400e, 0.48, 0.05, 2);
-      const steelMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.72, roughness: 0.3 });
-
-      const deskTop = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.055, 0.62), topWood);
-      deskTop.position.set(0, 0.74, 0);
-      addPrecisionEdge(deskTop,0x4e321c,0.29);
-      deskTop.castShadow = true;
-      deskTop.receiveShadow = true;
-      group.add(deskTop);
-
-      const underShelf = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.035, 0.48), darkWood);
-      underShelf.position.set(0, 0.58, 0);
-      group.add(underShelf);
-
-      const frontModesty = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.34, 0.035), darkWood);
-      frontModesty.position.set(0, 0.54, -0.26);
-      group.add(frontModesty);
-
-      [[-0.7, -0.25], [0.7, -0.25], [-0.7, 0.25], [0.7, 0.25]].forEach(([lx, lz]) => {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.73, 0.045), steelMat);
-        leg.position.set(lx, 0.365, lz);
-        group.add(leg);
-      });
-
-      if (hasBooks) {
-        const b1 = new THREE.Mesh(
-          new THREE.BoxGeometry(0.28, 0.035, 0.21),
-          new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.45 })
-        );
-        b1.position.set(-0.36, 0.785, 0.04);
-        b1.rotation.y = 0.14;
-        group.add(b1);
-
-        const b2 = new THREE.Mesh(
-          new THREE.BoxGeometry(0.26, 0.03, 0.19),
-          new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.45 })
-        );
-        b2.position.set(0.32, 0.782, 0.02);
-        b2.rotation.y = -0.18;
-        group.add(b2);
+    function createStudentDeskAndChair(hasBooks=true,hasChair=true) {
+      // V9.3: school desk with physical frame and two correctly placed chairs.
+      // Dimensions and chair centers stay unchanged to preserve seated poses,
+      // player collisions and room layout.
+      const group=new THREE.Group();
+      const oak=getProceduralPBRMaterial('wood',0xb8783d,0.53,0.01,1.6);
+      const darkOak=getProceduralPBRMaterial('wood',0x865b3b,0.62,0.01,1.5);
+      const frame=new THREE.MeshStandardMaterial({color:0x49525c,metalness:0.62,roughness:0.41});
+      const screws=new THREE.MeshStandardMaterial({color:0xb2bdc8,metalness:0.85,roughness:0.28});
+      const black=new THREE.MeshStandardMaterial({color:0x303740,roughness:0.86});
+      const blue=new THREE.MeshStandardMaterial({color:0x315f9c,roughness:0.63});
+      function box(parent,w,h,d,x,y,z,mat,highlight=false){
+        const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+        m.position.set(x,y,z);
+        m.castShadow=true;m.receiveShadow=true;
+        parent.add(m);
+        if(highlight)addPrecisionEdge(m,0x4e321c,0.18);
+        return m;
       }
-
-      if (hasChair) {
-        [-0.38, 0.38].forEach((cx) => {
-          const chair = new THREE.Group();
-          chair.position.set(cx, 0, 0.46);
-          const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.4), topWood);
-          seat.position.y = 0.44;
-          addPrecisionEdge(seat,0x4e321c,0.17);
-          seat.castShadow = true;
-          chair.add(seat);
-
-          const backRest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.035), topWood);
-          backRest.position.set(0, 0.74, 0.18);
-          chair.add(backRest);
-
-          [[-0.18, -0.16], [0.18, -0.16]].forEach(([lx, lz]) => {
-            const fLeg = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.44, 0.035), steelMat);
-            fLeg.position.set(lx, 0.22, lz);
-            chair.add(fLeg);
-          });
-          [-0.18, 0.18].forEach((lx) => {
-            const bPost = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.84, 0.035), steelMat);
-            bPost.position.set(lx, 0.42, 0.18);
-            chair.add(bPost);
-          });
+      // Full wood desktop: thin laminate band, two long inset edges.
+      box(group,1.56,0.052,0.64,0,0.747,0,oak,true);
+      box(group,1.55,0.013,0.65,0,0.715,0,darkOak);
+      box(group,1.54,0.018,0.033,0,0.725,0.299,oak);
+      box(group,1.54,0.018,0.03,0,0.725,-0.299,oak);
+      // A thin steel rail under the worktop makes the frame readable.
+      box(group,1.47,0.031,0.031,0,0.670,0.249,frame);
+      box(group,1.47,0.031,0.031,0,0.670,-0.249,frame);
+      // Under-table book shelf and modesty panel, clear of the knee space.
+      box(group,1.38,0.027,0.43,0,0.575,0.015,darkOak);
+      box(group,1.41,0.28,0.026,0,0.497,-0.273,darkOak);
+      for(const lx of [-0.696,0.696]){
+        for(const lz of [-0.242,0.242]){
+          box(group,0.043,0.71,0.043,lx,0.359,lz,frame);
+          box(group,0.061,0.046,0.058,lx,0.021,lz,black);
+        }
+        box(group,0.045,0.034,0.49,lx,0.455,0,frame);
+      }
+      // Two stationery compartments provide detail without additional textures.
+      if(hasBooks){
+        for(const [x,col,rot] of [[-0.36,blue,0.10],[0.33,oak,-0.11]]){
+          const book=box(group,0.275,0.03,0.205,x,0.791,0.025,col);
+          book.rotation.y=rot;
+          box(group,0.20,0.008,0.012,x,0.811,0.06,screws);
+        }
+        box(group,0.012,0.018,0.27,-0.02,0.796,-0.10,blue);
+      }
+      if(hasChair){
+        for(const cx of [-0.38,0.38]){
+          const chair=new THREE.Group();
+          chair.position.set(cx,0,0.46);
+          // Chair seat centers exactly match the pupils at dz+0.46.
+          box(chair,0.425,0.047,0.415,0,0.443,0,oak,true);
+          box(chair,0.39,0.02,0.388,0,0.408,0,frame);
+          // Backrest remains just behind the pupil (local +Z).
+          box(chair,0.41,0.20,0.032,0,0.772,0.190,oak,true);
+          for(const x of [-0.18,0.18]){
+            box(chair,0.034,0.44,0.035,x,0.22,-0.158,frame);
+            box(chair,0.037,0.82,0.036,x,0.41,0.174,frame);
+            box(chair,0.053,0.038,0.055,x,0.018,-0.158,black);
+            box(chair,0.055,0.038,0.055,x,0.018,0.174,black);
+          }
           group.add(chair);
-        });
+        }
       }
+      group.userData.furnitureType='classroom_desk_double_chair';
       return group;
     }
 
@@ -3568,7 +3561,7 @@
         currentBuildingSide === 'female' ? 'CHÀO MỪNG NGÀY HỘI TRI ÂN 20/11' : 'TIÊN HỌC LỄ • HẬU HỌC VĂN',
         theme.signBg
       );
-      clockAndSlogan.position.set(0, 3.05, -5.84);
+      clockAndSlogan.position.set(0, 3.38, -5.84);
       classroomGroup.add(clockAndSlogan);
 
       const boardTex = makeCanvasTexture('board_101_' + currentBuildingSide, 1024, 384, (ctx, w, h) => {
@@ -3738,7 +3731,7 @@
       clearance.reserve('classroom door',0,5.15,2.4,0.75,0.04);
 
       const clockAndSlogan = createWallClockAndSlogan('TIẾT HỌC TRI ÂN CHÀO MỪNG 20/11', theme.signBg);
-      clockAndSlogan.position.set(0, 3.18, -5.84);
+      clockAndSlogan.position.set(0, 3.43, -5.84);
       classroomGroup.add(clockAndSlogan);
 
       // Ceiling-mounted projector
