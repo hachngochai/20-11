@@ -208,6 +208,8 @@
 
     let interactiveList = [];
     let lastExitedDoorX = 0;
+    let hallwaySpawn = null;
+    let hallwayEntryAnim = null;
     const TEXTURE_CACHE = {};
     const PBR_MAT_CACHE = {};
 
@@ -317,7 +319,7 @@
     }
 
     function activeTransition() {
-      return transitionLock || !!(classroomWalkAnim || exitRoomWalkAnim || stairClimbAnim || room101GiftAnim || room301GiftAnim || campusEnterBuildingAnim);
+      return transitionLock || !!(classroomWalkAnim || exitRoomWalkAnim || stairClimbAnim || hallwayEntryAnim || room101GiftAnim || room301GiftAnim || campusEnterBuildingAnim);
     }
 
 
@@ -2873,7 +2875,7 @@
         upper.position.x = upX;
         createCenterTwoFlightStaircase(upper, upAction);
         targetGroup.add(upper);
-        registerCollider(upX, -1.17, 4.30, 4.23, 0.02);
+        registerCollider(upX, -1.17, 4.30, 4.44, 0.02);
         const sign = createSignBoard('LÊN TẦNG ' + (level + 1), '#164e63', '#38bdf8', '#f8fafc', 2.20, 0.39);
         sign.position.set(upX + 1.04, 2.15, 1.30);
         targetGroup.add(sign);
@@ -2886,7 +2888,7 @@
         lower.position.set(downX, -HALL_STAIR.landingY, 0);
         createCenterTwoFlightStaircase(lower, downAction);
         targetGroup.add(lower);
-        registerCollider(downX, -1.17, 4.30, 4.23, 0.02);
+        registerCollider(downX, -1.17, 4.30, 4.44, 0.02);
         const sign = createSignBoard('XUỐNG TẦNG ' + (level - 1), '#78350f', '#fbbf24', '#fff7ed', 2.25, 0.39);
         sign.position.set(downX - 1.04, 2.15, 1.30);
         targetGroup.add(sign);
@@ -3176,6 +3178,20 @@
     // =========================================================================
     // 7. FLOOR 1: HALLWAY 1, ROOM 101, ROOM 102, ROOM 103
     // =========================================================================
+    function placeHallwayAvatar(character) {
+      // The front entrance opens into a clear lobby, away from both stairwells.
+      if (hallwaySpawn && hallwaySpawn.kind === 'entrance') {
+        character.position.set(0, 0, 2.82);
+      } else if (hallwaySpawn && hallwaySpawn.kind === 'stairs') {
+        // Arrive next to the SAME physical shaft used in the preceding level.
+        character.position.set(hallwaySpawn.x, 0, 1.64);
+      } else {
+        character.position.set(lastExitedDoorX, 0, 1.44);
+      }
+      character.rotation.y = Math.PI;
+      hallwaySpawn = null;
+    }
+
     function buildHallway1() {
       const theme = getActiveBuildingTheme();
       while (hallwayGroup.children.length > 0) hallwayGroup.remove(hallwayGroup.children[0]);
@@ -3202,7 +3218,7 @@
       };
 
       roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
-      roomHero.position.set(lastExitedDoorX, 0, 1.2);
+      placeHallwayAvatar(roomHero);
       roomHero.rotation.y = Math.PI;
       hallwayGroup.add(roomHero);
 
@@ -3682,7 +3698,7 @@
       hallway2Group.userData.doors = { enter_201: d201.pivots, enter_202: d202.pivots };
 
       roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
-      roomHero.position.set(lastExitedDoorX, 0, 1.2);
+      placeHallwayAvatar(roomHero);
       roomHero.rotation.y = Math.PI;
       hallway2Group.add(roomHero);
 
@@ -4059,7 +4075,7 @@
       hallway3Group.userData.doors = { enter_301: d301.pivots, enter_302: d302.pivots };
 
       roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
-      roomHero.position.set(lastExitedDoorX, 0, 1.2);
+      placeHallwayAvatar(roomHero);
       roomHero.rotation.y = Math.PI;
       hallway3Group.add(roomHero);
 
@@ -4506,8 +4522,8 @@
         controls.maxPolarAngle = Math.PI * 0.47;
         if (!preservePose || cameraState.overviewScene !== sceneMode) {
           const hall = sceneMode.startsWith('hallway');
-          cameraState.overview.position.set(hall ? roomHero.position.x : 0, hall ? 2.8 : 2.7, hall ? 2.75 : 4.25);
-          cameraState.overview.target.set(hall ? roomHero.position.x : 0, 1.4, hall ? -1.25 : -1.8);
+          cameraState.overview.position.set(hall ? roomHero.position.x - 2.65 : 0, hall ? 3.05 : 2.7, hall ? 3.0 : 4.25);
+          cameraState.overview.target.set(hall ? roomHero.position.x : 0, 1.4, hall ? 0.25 : -1.8);
           cameraState.overviewScene = sceneMode;
         }
         camera.position.copy(cameraState.overview.position);
@@ -4534,7 +4550,7 @@
       interiorColliders = [];
       heroVelocity.set(0, 0, 0);
       transitionLock = false;
-      classroomWalkAnim = exitRoomWalkAnim = stairClimbAnim = null;
+      classroomWalkAnim = exitRoomWalkAnim = stairClimbAnim = hallwayEntryAnim = null;
       room101GiftAnim = room301GiftAnim = null;
       giftBloom = null;
       setSceneCurtain(false);
@@ -4805,33 +4821,48 @@
     }
 
     function startStairClimb(targetHallwayMode, goingUp) {
-      if (activeTransition()) return;
+      if (activeTransition() || !roomHero) return;
       lastExitedDoorX = 0;
-      const start = roomHero ? [roomHero.position.x, roomHero.position.y, roomHero.position.z] : [0,0,1.2];
-      const zNear=0.80, zFar=-2.10, zLanding=-2.53, rise=1.90;
-      // Two real flights, a crossing at the intermediate landing and a 180° turn.
-      const segments=goingUp ? [
-        {name:'approach',end:[1.04,0,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]-1.04,start[2]-zNear)/2.5)},
-        {name:'flight-1',end:[1.04,rise,zFar],seconds:3.7},
-        {name:'landing-in',end:[0.60,rise,zLanding],seconds:0.75},
-        {name:'landing-turn',end:[-1.04,rise,zLanding],seconds:1.45},
-        {name:'flight-2',end:[-1.04,rise*2,zNear],seconds:3.7},
-        {name:'exit',end:[-1.04,rise*2,zNear+0.40],seconds:0.70}
-      ] : [
-        {name:'approach',end:[-1.04,rise*2,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]+1.04,start[2]-zNear)/2.5)},
-        {name:'flight-2',end:[-1.04,rise,zFar],seconds:3.7},
-        {name:'landing-in',end:[-0.60,rise,zLanding],seconds:0.75},
-        {name:'landing-turn',end:[1.04,rise,zLanding],seconds:1.45},
-        {name:'flight-1',end:[1.04,0,zNear],seconds:3.7},
-        {name:'exit',end:[1.04,0,zNear+0.40],seconds:0.70}
+      // Adjacent floors share the same shafts, not a single merged staircase.
+      const shaftX = goingUp
+        ? HALL_STAIR.up[sceneMode]
+        : HALL_STAIR.down[sceneMode];
+      if (!Number.isFinite(shaftX)) return;
+      const rise=HALL_STAIR.landingY/2;
+      const zEntrance=0.94, zNear=0.80, zFar=-2.10, zLanding=-2.53;
+      const entranceX=shaftX+(goingUp?1.04:-1.04);
+      const exitX=shaftX+(goingUp?-1.04:1.04);
+      const start=[roomHero.position.x,0,roomHero.position.z];
+      const foyer=[0,0,2.20];
+      const lateral=[entranceX,0,2.18];
+      const entry=[entranceX,0,zEntrance];
+      // The first two waypoints keep the avatar on the corridor floor.
+      const segments=[
+        {name:'foyer',end:foyer,seconds:Math.max(0.50,Math.hypot(start[0]-foyer[0],start[2]-foyer[2])/1.75)},
+        {name:'approach-side',end:lateral,seconds:Math.max(0.65,Math.abs(entranceX)/1.55)},
+        {name:'approach-tread',end:entry,seconds:0.9}
       ];
-      let previous=[start[0],goingUp?0:rise*2,start[2]];
-      const steps=segments.map(item=>{const step={...item,start:previous};previous=item.end;return step;});
-      stairClimbAnim={stage:0,stageTime:0,progress:0,steps,targetHallwayMode,goingUp,
-        descentCut: goingUp ? 0 : 0.42 };
-      if(!goingUp) setSceneCurtain(true);
+      if(goingUp) {
+        segments.push(
+          {name:'flight-1',end:[shaftX+1.04,rise,zFar],seconds:3.75},
+          {name:'landing-in',end:[shaftX+0.60,rise,zLanding],seconds:0.75},
+          {name:'landing-turn',end:[shaftX-1.04,rise,zLanding],seconds:1.6},
+          {name:'flight-2',end:[shaftX-1.04,rise*2,zNear],seconds:3.75},
+          {name:'exit',end:[exitX,rise*2,1.20],seconds:0.75}
+        );
+      } else {
+        segments.push(
+          {name:'flight-2',end:[shaftX-1.04,-rise,zFar],seconds:3.75},
+          {name:'landing-in',end:[shaftX-0.60,-rise,zLanding],seconds:0.75},
+          {name:'landing-turn',end:[shaftX+1.04,-rise,zLanding],seconds:1.6},
+          {name:'flight-1',end:[shaftX+1.04,-rise*2,zNear],seconds:3.75},
+          {name:'exit',end:[exitX,-rise*2,1.20],seconds:0.75}
+        );
+      }
+      let last=start;
+      const steps=segments.map(item=>{const result={...item,start:last};last=item.end;return result;});
+      stairClimbAnim={stage:0,stageTime:0,progress:0,steps,targetHallwayMode,goingUp,shaftX,exitX};
       resetHeroMotion();
-      // Camera is controlled by the animation until the second flight is completed.
       if(controls && !isFirstPersonPOV) controls.enabled=false;
       playChime(goingUp?610:455,0.11);
     }
@@ -5300,11 +5331,28 @@
           if (p > 0.85) setSceneCurtain(true);
           if (p >= 1) {
             campusEnterBuildingAnim = null;
+            hallwaySpawn = { kind: 'entrance' };
             switchSceneMode('hallway');
+            // Enter through the main doorway first, then take a few steps
+            // into the open lobby; do not spawn against the staircase.
+            hallwayEntryAnim = { elapsed: 0, duration: 1.5, fromZ: 2.82, toZ: 2.05 };
           }
         }
       }
 
+      if (hallwayEntryAnim && roomHero && sceneMode === 'hallway') {
+        const intro = hallwayEntryAnim;
+        intro.elapsed = Math.min(intro.duration, intro.elapsed + dt);
+        const progress = smooth01(intro.elapsed / intro.duration);
+        roomHero.position.z = THREE.MathUtils.lerp(intro.fromZ, intro.toZ, progress);
+        roomHero.position.x = THREE.MathUtils.lerp(0, -0.12, progress);
+        roomHero.rotation.y = Math.PI;
+        animateHumanWalk(roomHero, elapsed, 7, dt);
+        if (intro.elapsed >= intro.duration) {
+          hallwayEntryAnim = null;
+          resetHeroMotion();
+        }
+      }
       if (classroomWalkAnim && roomHero) {
         const a = classroomWalkAnim;
         a.progress = Math.min(1,a.progress + dt/2.0);
@@ -5345,48 +5393,43 @@
       }
       if (stairClimbAnim) {
         const a=stairClimbAnim;
-        // A descent begins from the upper floor's stairwell reference frame:
-        // hide that one-time rebase to avoid a visible 3.8-metre vertical snap.
-        if (a.descentCut > 0) {
-          a.descentCut = Math.max(0,a.descentCut - dt);
-          if (a.descentCut === 0 && roomHero) {
-            roomHero.position.y = 3.8;
-            setSceneCurtain(false);
-          }
-        } else {
         const seg=a.steps[a.stage];
         if(seg && roomHero) {
           a.stageTime=Math.min(seg.seconds,a.stageTime+dt);
           const t=smooth01(a.stageTime/seg.seconds);
           const [x0,y0,z0]=seg.start;
           const [x1,y1,z1]=seg.end;
-          roomHero.position.set(THREE.MathUtils.lerp(x0,x1,t),THREE.MathUtils.lerp(y0,y1,t),THREE.MathUtils.lerp(z0,z1,t));
+          roomHero.position.set(
+            THREE.MathUtils.lerp(x0,x1,t),
+            THREE.MathUtils.lerp(y0,y1,t),
+            THREE.MathUtils.lerp(z0,z1,t)
+          );
           const dx=x1-x0,dz=z1-z0;
           if(Math.hypot(dx,dz)>0.03){
             const desired=Math.atan2(dx,dz);
             const dyaw=((desired-roomHero.rotation.y+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
             roomHero.rotation.y+=dyaw*(1-Math.exp(-dt*8));
-            if (isFirstPersonPOV) {
-              // Keep the eye-level camera turning with the body on the landing.
+            if(isFirstPersonPOV) {
               const diff=((roomHero.rotation.y-fpYaw+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
               fpYaw+=diff*(1-Math.exp(-dt*9));
             }
           }
           animateHumanWalk(roomHero,elapsed,seg.name.startsWith('landing')?5:8.5,dt);
-          const duration=a.steps.reduce((sum,v)=>sum+v.seconds,0);
+          const total=a.steps.reduce((sum,v)=>sum+v.seconds,0);
           const prior=a.steps.slice(0,a.stage).reduce((sum,v)=>sum+v.seconds,0);
-          a.progress=(prior+a.stageTime)/duration;
-          if(a.progress>0.965)setSceneCurtain(true);
-          if(a.stageTime>=seg.seconds){
+          a.progress=(prior+a.stageTime)/total;
+          // Only mask the floor swap after ALL steps and the landing are shown.
+          if(a.progress>0.970)setSceneCurtain(true);
+          if(a.stageTime>=seg.seconds) {
             a.stage++;
             a.stageTime=0;
             if(a.stage>=a.steps.length){
               const next=a.targetHallwayMode;
+              hallwaySpawn={kind:'stairs',x:a.exitX,z:1.64};
               stairClimbAnim=null;
               switchSceneMode(next);
             }
           }
-        }
         }
       }
       if (room101GiftAnim && roomHero && room101Teacher) updateGiftCeremony(room101GiftAnim,dt,elapsed);
@@ -5473,8 +5516,11 @@
           roomHero.visible = true;
           const activeGift = room101GiftAnim || room301GiftAnim;
           if (stairClimbAnim) {
-            camera.position.lerp(new THREE.Vector3(4.65,3.38,3.25),1-Math.exp(-dt*3.4));
-            controls.target.lerp(new THREE.Vector3(0,1.95,-0.72),1-Math.exp(-dt*3.4));
+            const currentY = roomHero.position.y;
+            const viewY = stairClimbAnim.goingUp ? Math.max(2.7,currentY+1.75)
+              : Math.max(-2.4,currentY+2.4);
+            camera.position.lerp(new THREE.Vector3(stairClimbAnim.shaftX+4.0,viewY,3.0),1-Math.exp(-dt*3.1));
+            controls.target.lerp(new THREE.Vector3(stairClimbAnim.shaftX,currentY+1.12,-0.95),1-Math.exp(-dt*3.1));
           }
           if (activeGift) {
             // A composed third-person shot: both faces and the bouquet remain visible.
@@ -5491,7 +5537,9 @@
           const limZ=hall?3.3:({room201:6.25,room301:6.0,room302:5.9}[sceneMode]||5.38);
           camera.position.x=THREE.MathUtils.clamp(camera.position.x,-limX,limX);
           camera.position.z=THREE.MathUtils.clamp(camera.position.z,-limZ,limZ);
-          camera.position.y=THREE.MathUtils.clamp(camera.position.y,1.65,hall?3.55:3.4);
+          camera.position.y=stairClimbAnim
+            ? THREE.MathUtils.clamp(camera.position.y,-2.5,6.6)
+            : THREE.MathUtils.clamp(camera.position.y,1.65,hall?3.55:3.4);
         } else if (SCENE_CAMERA_BOUNDS[sceneMode]) {
           const b=SCENE_CAMERA_BOUNDS[sceneMode];
           camera.position.x=THREE.MathUtils.clamp(camera.position.x,b.minX,b.maxX);
