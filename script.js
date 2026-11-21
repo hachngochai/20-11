@@ -2890,65 +2890,81 @@
     // 6. INTERIOR SHARED HELPERS (DOORS, 2-FLIGHT STAIRS, HALLWAY & ROOM SHELLS)
     // =========================================================================
     function createModernDoubleDoor(x, z, doorType, labelText) {
-      const group = new THREE.Group();
-      group.position.set(x, 0, z);
-
-      const frameMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.26, metalness: 0.82 });
-      const leafMat = getProceduralPBRMaterial('wood', 0xf1f5f9, 0.32, 0.06, 1);
-      const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.45, roughness: 0.06, metalness: 0.12 });
-      const steelMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.9, roughness: 0.15 });
-
-      [-1.12, 1.12].forEach((jx) => {
-        const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.95, 0.26), frameMat);
-        jamb.position.set(jx, 1.475, 0);
-        group.add(jamb);
+      // V9.2 architectural door: the glass is inside a real panel frame.
+      // Hinge pivots and interaction IDs remain backward compatible.
+      const group=new THREE.Group();
+      group.position.set(x,0,z);
+      const pink=currentBuildingSide==='female';
+      const frame=new THREE.MeshStandardMaterial({color:pink?0x493d48:0x283846,roughness:0.42,metalness:0.42});
+      const wood=getProceduralPBRMaterial('wood',pink?0x966e69:0x906847,0.58,0.015,1.8);
+      const steel=new THREE.MeshStandardMaterial({color:0xcbd5d9,roughness:0.30,metalness:0.80});
+      const bronze=new THREE.MeshStandardMaterial({color:pink?0xc7a185:0xb5a077,roughness:0.37,metalness:0.68});
+      const inlay=new THREE.MeshStandardMaterial({color:pink?0x805a63:0x536979,roughness:0.68,metalness:0.04});
+      const glazing=new THREE.MeshPhysicalMaterial({
+        color:0xb6dce7,roughness:0.19,metalness:0.06,
+        transparent:true,opacity:0.63,depthWrite:false,
+        side:THREE.DoubleSide,clearcoat:0.42
       });
-
-      const midTransom = new THREE.Mesh(new THREE.BoxGeometry(2.36, 0.12, 0.26), frameMat);
-      midTransom.position.set(0, 2.44, 0);
-      group.add(midTransom);
-
-      const transomGlass = new THREE.Mesh(new THREE.BoxGeometry(2.12, 0.42, 0.06), glassMat);
-      transomGlass.position.set(0, 2.68, 0);
-      group.add(transomGlass);
-
-      const topHeader = new THREE.Mesh(new THREE.BoxGeometry(2.36, 0.12, 0.26), frameMat);
-      topHeader.position.set(0, 2.92, 0);
-      group.add(topHeader);
-
-      const sign = createSignBoard(labelText, '#0f172a', '#f59e0b', '#fef3c7', 2.05, 0.38);
-      sign.position.set(0, 3.22, 0.08);
+      function part(parent,w,h,d,x,y,z,mat,hit=false){
+        const obj=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+        obj.position.set(x,y,z);
+        obj.castShadow=mat!==glazing;
+        obj.receiveShadow=true;
+        if(hit)obj.userData.interactiveType=doorType;
+        parent.add(obj);
+        return obj;
+      }
+      // Surround, architrave, transom and flush threshold.
+      for(const x of [-1.12,1.12]){
+        part(group,0.12,2.97,0.24,x,1.485,0,frame);
+        part(group,0.028,2.88,0.275,x,1.48,0.015,bronze);
+      }
+      part(group,2.36,0.12,0.25,0,2.92,0,frame);
+      part(group,2.36,0.11,0.25,0,2.40,0,frame);
+      part(group,2.17,0.41,0.027,0,2.675,0,glazing);
+      part(group,0.035,0.41,0.075,0,2.675,0.03,frame);
+      part(group,2.17,0.024,0.09,0,2.83,0.045,bronze);
+      part(group,2.14,0.025,0.28,0,0.025,0,steel);
+      const sign=createSignBoard(labelText,pink?'#442b42':'#243f50',
+        pink?'#e2b49a':'#b9cdd0','#fffaf0',2.08,0.36);
+      sign.position.set(0,3.24,0.13);
       group.add(sign);
-
-      const leftPivot = new THREE.Group();
-      leftPivot.position.set(-1.05, 0, 0);
-      const lPanel = new THREE.Mesh(new THREE.BoxGeometry(1.03, 2.38, 0.075), leafMat);
-      lPanel.position.set(0.515, 1.19, 0);
-      lPanel.userData = { interactiveType: doorType };
-      leftPivot.add(lPanel);
-      const lGlass = new THREE.Mesh(new THREE.BoxGeometry(0.44, 1.58, 0.095), glassMat);
-      lGlass.position.set(0.56, 1.34, 0);
-      leftPivot.add(lGlass);
-      const lHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.48, 10), steelMat);
-      lHandle.position.set(0.92, 1.15, 0.065);
-      leftPivot.add(lHandle);
-      group.add(leftPivot);
-
-      const rightPivot = new THREE.Group();
-      rightPivot.position.set(1.05, 0, 0);
-      const rPanel = new THREE.Mesh(new THREE.BoxGeometry(1.03, 2.38, 0.075), leafMat);
-      rPanel.position.set(-0.515, 1.19, 0);
-      rPanel.userData = { interactiveType: doorType };
-      rightPivot.add(rPanel);
-      const rGlass = new THREE.Mesh(new THREE.BoxGeometry(0.44, 1.58, 0.095), glassMat);
-      rGlass.position.set(-0.56, 1.34, 0);
-      rightPivot.add(rGlass);
-      const rHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.48, 10), steelMat);
-      rHandle.position.set(-0.92, 1.15, 0.065);
-      rightPivot.add(rHandle);
-      group.add(rightPivot);
-
-      return { group, pivots: { left: leftPivot, right: rightPivot } };
+      function makeLeaf(isLeft){
+        const dir=isLeft?1:-1;
+        const pivot=new THREE.Group();
+        pivot.position.set(isLeft?-1.05:1.05,0,0);
+        const cx=dir*0.515;
+        for(const zz of [-0.047,0.047]){
+          for(const xx of [dir*0.075,dir*0.955]){
+            part(pivot,0.09,2.35,0.027,xx,1.19,zz,wood,true);
+          }
+          part(pivot,0.97,0.09,0.028,cx,2.325,zz,wood,true);
+          part(pivot,0.97,0.095,0.028,cx,0.735,zz,wood,true);
+          part(pivot,0.92,0.046,0.027,cx,1.69,zz,bronze,true);
+        }
+        // The transparent glazing and lower timber inlay share the opening.
+        part(pivot,0.85,1.54,0.023,cx,1.51,0,glazing,true);
+        part(pivot,0.86,0.62,0.055,cx,0.375,0,inlay,true);
+        part(pivot,0.75,0.48,0.061,cx,0.375,0.02,wood,true);
+        part(pivot,0.92,0.07,0.072,cx,0.10,0.02,bronze,true);
+        // Double-sided vertical pulls with separate mounting bosses.
+        const latch=dir*0.83;
+        for(const face of [-1,1]){
+          const z=face*0.075;
+          part(pivot,0.12,0.22,0.021,latch,1.13,z,bronze,true);
+          for(const y of [1.01,1.29])
+            part(pivot,0.092,0.027,0.13,latch,y,face*0.10,steel,true);
+          const grip=new THREE.Mesh(new THREE.CylinderGeometry(0.016,0.016,0.36,12),steel);
+          grip.position.set(latch,1.15,face*0.17);
+          grip.userData.interactiveType=doorType;
+          grip.castShadow=true;
+          pivot.add(grip);
+        }
+        group.add(pivot);
+        return pivot;
+      }
+      const leftPivot=makeLeaf(true),rightPivot=makeLeaf(false);
+      return {group,pivots:{left:leftPivot,right:rightPivot}};
     }
 
     function createCenterTwoFlightStaircase(group, actionType) {
