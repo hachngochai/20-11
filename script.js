@@ -2295,26 +2295,89 @@
         bGroup.add(step);
       }
 
-      const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.24, 3.1, 2.6), frameMat);
-      doorFrame.position.set(frontFaceX, 2.05, 0);
-      bGroup.add(doorFrame);
-
-      const leftDoorPivot = new THREE.Group();
-      leftDoorPivot.position.set(frontFaceX, 0.5, -1.18);
-      const lGlass = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.9, 1.15), glassMat);
-      lGlass.position.set(0, 1.45, 0.575);
-      lGlass.userData = { interactiveType: doorType };
-      leftDoorPivot.add(lGlass);
-      bGroup.add(leftDoorPivot);
-
-      const rightDoorPivot = new THREE.Group();
-      rightDoorPivot.position.set(frontFaceX, 0.5, 1.18);
-      const rGlass = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.9, 1.15), glassMat);
-      rGlass.position.set(0, 1.45, -0.575);
-      rGlass.userData = { interactiveType: doorType };
-      rightDoorPivot.add(rGlass);
-      bGroup.add(rightDoorPivot);
-
+      // V9.2: three-dimensional school entrance with structural reveals,
+      // bronze mullions, tinted glass, inset kick plates and paired pull bars.
+      // Old version put the glass on top of an opaque door block.
+      const portalFrame = new THREE.MeshStandardMaterial({
+        color:isFemale?0x51404c:0x344455,roughness:0.39,metalness:0.48
+      });
+      const bronze = new THREE.MeshStandardMaterial({
+        color:isFemale?0xd2aa91:0xb5a88a,roughness:0.33,metalness:0.74
+      });
+      const doorTint=new THREE.MeshPhysicalMaterial({
+        color:isFemale?0xcad8e6:0xbddce9,metalness:0.05,roughness:0.14,
+        transparent:true,opacity:0.71,depthWrite:false,
+        clearcoat:0.56,side:THREE.DoubleSide
+      });
+      const doorKick=new THREE.MeshStandardMaterial({
+        color:isFemale?0x786171:0x566f7e,metalness:0.16,roughness:0.55
+      });
+      const darkEntrance=new THREE.MeshStandardMaterial({
+        color:0x192b37,roughness:0.8,metalness:0.05
+      });
+      const outerX=frontFaceX+outDir*0.20;
+      const addDoorPart=(group,w,h,d,x,y,z,mat,interactive=false)=>{
+        const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+        mesh.position.set(x,y,z);
+        mesh.castShadow=mat!==doorTint;
+        mesh.receiveShadow=true;
+        if(interactive)mesh.userData.interactiveType=doorType;
+        group.add(mesh);
+        return mesh;
+      };
+      // This dark inset makes the doorway read as depth even against the
+      // existing solid building shell (no disruptive wall CSG required).
+      addDoorPart(bGroup,0.07,3.06,2.45,frontFaceX+outDir*0.105,2.035,0,darkEntrance);
+      [-1.24,1.24].forEach(zz=>{
+        addDoorPart(bGroup,0.23,3.12,0.15,outerX,2.06,zz,portalFrame);
+        addDoorPart(bGroup,0.258,2.96,0.025,outerX+outDir*0.025,2.06,zz*0.96,bronze);
+      });
+      addDoorPart(bGroup,0.25,0.135,2.59,outerX,3.56,0,portalFrame);
+      addDoorPart(bGroup,0.26,0.055,2.52,outerX+outDir*0.02,3.47,0,bronze);
+      addDoorPart(bGroup,0.44,0.07,2.38,outerX+outDir*0.12,0.53,0,bronze);
+      // Vertical glass-door wings, swinging about the original hinges.
+      function makeEntranceWing(left){
+        const sign=left?1:-1;
+        const hinge=new THREE.Group();
+        hinge.position.set(frontFaceX+outDir*0.275,0.5,left?-1.18:1.18);
+        const centerZ=sign*0.575;
+        for(const lx of [-0.048,0.048]){
+          addDoorPart(hinge,0.037,2.84,0.095,lx,1.47,sign*0.061,portalFrame,true);
+          addDoorPart(hinge,0.037,2.84,0.095,lx,1.47,sign*1.087,portalFrame,true);
+          addDoorPart(hinge,0.037,0.09,1.14,lx,2.85,centerZ,portalFrame,true);
+          addDoorPart(hinge,0.037,0.08,1.14,lx,0.86,centerZ,portalFrame,true);
+          addDoorPart(hinge,0.04,0.037,1.12,lx,2.04,centerZ,bronze,true);
+        }
+        // Different panes and the base panel never occupy the same space.
+        addDoorPart(hinge,0.026,1.89,1.03,0,1.90,centerZ,doorTint,true);
+        addDoorPart(hinge,0.074,0.75,1.03,0,0.412,centerZ,doorKick,true);
+        addDoorPart(hinge,0.085,0.12,1.05,outDir*0.018,0.12,centerZ,bronze,true);
+        // Fine specular highlight strips imply layered glass at an angle.
+        addDoorPart(hinge,0.014,1.72,0.028,outDir*0.06,1.92,sign*0.18,
+          new THREE.MeshBasicMaterial({color:0xf4ffff,transparent:true,opacity:0.19,depthWrite:false}));
+        const handleZ=sign*1.003;
+        const handleX=outDir*0.175;
+        for(const y of [1.30,1.80]){
+          addDoorPart(hinge,0.175,0.05,0.08,handleX-outDir*0.075,y,handleZ,bronze,true);
+        }
+        const grip=new THREE.Mesh(new THREE.CylinderGeometry(0.027,0.027,0.65,14),bronze);
+        grip.position.set(handleX,1.55,handleZ);
+        grip.castShadow=true;
+        grip.userData.interactiveType=doorType;
+        hinge.add(grip);
+        bGroup.add(hinge);
+        return hinge;
+      }
+      const leftDoorPivot=makeEntranceWing(true);
+      const rightDoorPivot=makeEntranceWing(false);
+      // Warm recessed fixtures beneath the entrance awning; material glow only.
+      const lightFixture=new THREE.MeshStandardMaterial({
+        color:0xf9e4bb,emissive:0xf3d3a0,emissiveIntensity:0.22,roughness:0.44
+      });
+      for(const z of [-1.20,1.20]){
+        addDoorPart(bGroup,0.39,0.028,0.34,
+          frontFaceX+outDir*0.82,3.694,z,lightFixture);
+      }
       bGroup.userData.entranceDoors = { left: leftDoorPivot, right: rightDoorPivot, outDir };
       return bGroup;
     }
