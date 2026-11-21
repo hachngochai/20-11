@@ -252,6 +252,7 @@
     let floatingPetals = [];
     let activeIdleCharacters = [];
 
+    let campusDismountAnim = null;
     let campusEnterBuildingAnim = null;
     let classroomWalkAnim = null;
     let exitRoomWalkAnim = null;
@@ -398,7 +399,7 @@
     }
 
     function activeTransition() {
-      return transitionLock || !!(classroomWalkAnim || exitRoomWalkAnim || stairClimbAnim || hallwayEntryAnim || room101GiftAnim || room301GiftAnim || campusEnterBuildingAnim);
+      return transitionLock || !!(campusDismountAnim || classroomWalkAnim || exitRoomWalkAnim || stairClimbAnim || hallwayEntryAnim || room101GiftAnim || room301GiftAnim || campusEnterBuildingAnim);
     }
 
 
@@ -4915,7 +4916,7 @@
       interiorColliders = [];
       heroVelocity.set(0, 0, 0);
       transitionLock = false;
-      classroomWalkAnim = exitRoomWalkAnim = stairClimbAnim = hallwayEntryAnim = null;
+      classroomWalkAnim = exitRoomWalkAnim = stairClimbAnim = hallwayEntryAnim = campusDismountAnim = null;
       room101GiftAnim = room301GiftAnim = null;
       giftBloom = null;
       setSceneCurtain(false);
@@ -4965,12 +4966,21 @@
         setClassroomControls([]);
         updateHeaderStatus('Khuôn Viên Tri Ân 20/11');
         if (campusGroup.children.length === 0) buildCampusScene();
-        // Scooter -> campus: move ONE Object3D to the walking scene.
+        // Scooter -> campus: detach and animate exactly the same student.
+        // The motorcycle stays parked and visibly empty after dismount.
+        const arrivingFromScooter = campusHero?.parent === campusScooterGroup;
         campusHero = setProtagonistPose('walking', true);
         if (campusHero.parent !== campusGroup) {
           campusGroup.add(campusHero);
-          campusHero.position.set(0.85, 0.14, 17.6);
+          const scooterZ = campusScooterGroup?.position.z ?? 18;
+          const initialZ = arrivingFromScooter ? scooterZ + 0.06 : 17.6;
+          campusHero.position.set(arrivingFromScooter ? 0.03 : 0.85, 0.14, initialZ);
           campusHero.rotation.y = Math.PI;
+          if (arrivingFromScooter) {
+            campusDismountAnim = { elapsed: 0, duration: 1.05,
+              startX: 0.03, startZ: initialZ,
+              endX: 0.85, endZ: scooterZ - 0.40 };
+          }
         }
         campusGroup.traverse((o) => {
           if (o.isMesh && o.userData && o.userData.interactiveType) interactiveList.push(o);
@@ -5752,6 +5762,23 @@
         controls.target.set(0, 2.2, 22 - progress * 14);
         if (progress >= 1) {
           switchSceneMode('campus');
+        }
+      }
+
+      if (campusDismountAnim && campusHero && sceneMode === 'campus') {
+        const d = campusDismountAnim;
+        d.elapsed = Math.min(d.duration, d.elapsed + dt);
+        const u = smooth01(d.elapsed / d.duration);
+        campusHero.position.set(
+          THREE.MathUtils.lerp(d.startX, d.endX, u),
+          0.14,
+          THREE.MathUtils.lerp(d.startZ, d.endZ, u)
+        );
+        campusHero.rotation.y = Math.PI;
+        animateHumanWalk(campusHero,elapsed,7,dt);
+        if (u >= 1) {
+          campusDismountAnim = null;
+          resetHeroMotion();
         }
       }
 
