@@ -2960,8 +2960,12 @@
           slab.position.set((cur+x1)/2,1.9,z); targetGroup.add(slab);
         }
       }
-      portalWall(-13,13,-3.55,[-9.2,-4.6,0,6.8]);
-      portalWall(-13,13,3.8,[0]);
+      // Only real classroom doors have apertures: floor 1 has rooms
+      // 101/102/103, upper floors have the left and right classrooms.
+      const rearDoorXs = level === 1 ? [-9.2,-4.6,6.8] : [-6.8,6.8];
+      portalWall(-13,13,-3.55,rearDoorXs);
+      // The building entrance exists on the ground floor only.
+      portalWall(-13,13,3.8,level === 1 ? [0] : []);
       // Trims are also split around the entrance apertures.
       const dadoLeft = new THREE.Mesh(new THREE.BoxGeometry(11.75,0.82,0.06),dadoMat);
       dadoLeft.position.set(-7.125,0.41,3.65);
