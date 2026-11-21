@@ -207,7 +207,6 @@
     let lastPointerY = 0;
 
     let interactiveList = [];
-    let floatingLabelsData = [];
     let lastExitedDoorX = 0;
     const TEXTURE_CACHE = {};
     const PBR_MAT_CACHE = {};
@@ -240,7 +239,6 @@
     let floatingPetals = [];
     let activeIdleCharacters = [];
 
-    let campusGateReplayAnim = null;
     let campusEnterBuildingAnim = null;
     let classroomWalkAnim = null;
     let exitRoomWalkAnim = null;
@@ -653,8 +651,6 @@
       const pov = document.getElementById('btn-camera-donor');
       if (whole) { whole.classList.toggle('camera-active', !isFirstPersonPOV); whole.setAttribute('aria-pressed', String(!isFirstPersonPOV)); }
       if (pov) { pov.classList.toggle('camera-active', isFirstPersonPOV); pov.setAttribute('aria-pressed', String(isFirstPersonPOV)); }
-      const m = document.getElementById('camera-mode-info');
-      if (m) m.textContent = isFirstPersonPOV ? 'POV • Mắt người tặng hoa' : 'Cam toàn cảnh • Tự do xoay';
       if (roomHero && sceneMode !== 'campus' && sceneMode !== 'intro') roomHero.visible = !isFirstPersonPOV;
     }
 
@@ -1831,62 +1827,6 @@
     // =========================================================================
     // 4. FLOATING LABELS & PETAL PARTICLES
     // =========================================================================
-    function createFloatingLabel(obj3D, htmlText, yOffset = 2.15) {
-      const layer = document.getElementById('floating-labels-layer');
-      if (!layer) return null;
-      const el = document.createElement('div');
-      el.className = 'floating-label glass-panel rounded-full px-2.5 py-1 text-[11px] font-bold text-white border border-white/20';
-      el.innerHTML = htmlText;
-      layer.appendChild(el);
-      const item = { obj3D, el, yOffset };
-      floatingLabelsData.push(item);
-      return item;
-    }
-
-    function clearFloatingLabels() {
-      const layer = document.getElementById('floating-labels-layer');
-      if (layer) layer.innerHTML = '';
-      floatingLabelsData = [];
-    }
-
-    function updateFloatingLabels() {
-      if (!camera) return;
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const v = new THREE.Vector3();
-      floatingLabelsData.forEach((item) => {
-        if (!item.obj3D || !item.obj3D.parent) {
-          item.el.style.opacity = '0';
-          return;
-        }
-        let visibleInTree = true;
-        let p = item.obj3D;
-        while (p) {
-          if (p.visible === false) {
-            visibleInTree = false;
-            break;
-          }
-          p = p.parent;
-        }
-        if (!visibleInTree) {
-          item.el.style.opacity = '0';
-          return;
-        }
-        item.obj3D.getWorldPosition(v);
-        v.y += item.yOffset;
-        v.project(camera);
-        if (v.z > 1 || v.z < -1) {
-          item.el.style.opacity = '0';
-          return;
-        }
-        const sx = (v.x * 0.5 + 0.5) * width;
-        const sy = (-v.y * 0.5 + 0.5) * height;
-        item.el.style.left = `${sx}px`;
-        item.el.style.top = `${sy}px`;
-        item.el.style.opacity = '1';
-      });
-    }
-
     function initFloatingPetals() {
       const petalGeo = new THREE.PlaneGeometry(0.14, 0.1);
       const colors = [0xfda4af, 0xfef08a, 0xfbcfe8, 0xffffff];
@@ -2483,7 +2423,6 @@
       teacherBuilding.position.set(-14.2, 0, -2);
       campusGroup.add(teacherBuilding);
       campusGroup.userData.teacherBuilding = teacherBuilding;
-      createFloatingLabel(teacherBuilding, '💙 Tri Ân Thầy Cô Giáo (Tòa Xanh)', 13.8);
 
       const femaleBuilding = createCampusSchoolBuilding({
         side: 'female',
@@ -2495,7 +2434,6 @@
       femaleBuilding.position.set(14.2, 0, -2);
       campusGroup.add(femaleBuilding);
       campusGroup.userData.femaleBuilding = femaleBuilding;
-      createFloatingLabel(femaleBuilding, '💖 Sự Kiện 20-11 (Tòa Hồng)', 13.8);
 
       const brickMat = getProceduralPBRMaterial('brick', 0xb45309, 0.68);
       const stoneTrimMat = getProceduralPBRMaterial('tile', 0xf8fafc, 0.38);
@@ -4452,7 +4390,6 @@
       setSceneCurtain(false);
       interactiveList = [];
       activeIdleCharacters = [];
-      clearFloatingLabels();
       hideSpeechCard();
 
       campusGroup.visible = mode === 'intro' || mode === 'campus';
@@ -4500,12 +4437,6 @@
         campusGroup.traverse((o) => {
           if (o.isMesh && o.userData && o.userData.interactiveType) interactiveList.push(o);
         });
-        if (campusGroup.userData.teacherBuilding) {
-          createFloatingLabel(campusGroup.userData.teacherBuilding, '💙 Tri Ân Thầy Cô Giáo (Tòa Xanh)', 13.8);
-        }
-        if (campusGroup.userData.femaleBuilding) {
-          createFloatingLabel(campusGroup.userData.femaleBuilding, '💖 Sự Kiện 20-11 (Tòa Hồng)', 13.8);
-        }
         camera.position.set(0, 12.5, 33);
         controls.target.set(0, 2.5, 4);
         return;
@@ -5174,16 +5105,6 @@
           if (cl.position.x > 65) cl.position.x = -65;
         });
 
-        if (campusGateReplayAnim && campusScooterGroup) {
-          campusGateReplayAnim.progress += dt * 0.35;
-          const p = Math.min(1, campusGateReplayAnim.progress);
-          campusScooterGroup.position.z = 32 - p * 14;
-          scooterWheels.forEach((w) => {
-            w.rotation.x -= dt * 11;
-          });
-          if (p >= 1) campusGateReplayAnim = null;
-        }
-
         if (campusEnterBuildingAnim && campusHero) {
           campusEnterBuildingAnim.progress += dt * 0.48;
           const p = Math.min(1, campusEnterBuildingAnim.progress);
@@ -5377,7 +5298,6 @@
         controls.update();
       }
 
-      updateFloatingLabels();
       updatePOVViewmodel(elapsed);
       renderer.render(scene, camera);
     }
@@ -5386,38 +5306,11 @@
       const skipBtn = document.getElementById('btn-skip-intro');
       if (skipBtn) skipBtn.addEventListener('click', () => switchSceneMode('campus'));
 
-      document.querySelectorAll('.cam-pill[data-cam]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const camType = btn.getAttribute('data-cam');
-          if (sceneMode !== 'campus') switchSceneMode('campus');
-          if (camType === 'gate') {
-            camera.position.set(0, 5.2, 34);
-            controls.target.set(0, 3.2, 24);
-          } else {
-            camera.position.set(0, 12.5, 33);
-            controls.target.set(0, 2.5, 4);
-          }
-          playChime(560, 0.12);
-        });
-      });
-
       const enterTeacherBtn = document.getElementById('btn-enter-teacher-bldg');
       if (enterTeacherBtn) enterTeacherBtn.addEventListener('click', () => startEnterBuildingSequence('teacher'));
 
       const enterFemaleBtn = document.getElementById('btn-enter-female-bldg');
       if (enterFemaleBtn) enterFemaleBtn.addEventListener('click', () => startEnterBuildingSequence('female'));
-
-      const replayGateBtn = document.getElementById('btn-replay-gate');
-      if (replayGateBtn) {
-        replayGateBtn.addEventListener('click', () => {
-          if (sceneMode !== 'campus') switchSceneMode('campus');
-          if (scooterRiderMesh) scooterRiderMesh.visible = true;
-          campusGateReplayAnim = { progress: 0 };
-          camera.position.set(4.5, 4.8, 32);
-          controls.target.set(0, 2.2, 22);
-          playChime(620, 0.16);
-        });
-      }
 
       window.addEventListener('keydown', (e) => {
         const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'') || document.activeElement?.isContentEditable;
