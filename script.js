@@ -811,122 +811,145 @@
       return tex;
     }
 
-    function getProceduralPBRMaterial(type, baseHex = 0xffffff, roughness = 0.5, metalness = 0.05, repeat = 2) {
-      const cacheKey = `pbr2_${type}_${baseHex}_${roughness}_${metalness}_${repeat}`;
-      if (PBR_MAT_CACHE[cacheKey]) return PBR_MAT_CACHE[cacheKey];
-
-      const colorObj = new THREE.Color(baseHex);
-      // Canvas textures require sRGB hex; linear RGB component values darkened the older surfaces.
-      const baseCss = typeof baseHex === 'number'
-        ? `#${baseHex.toString(16).padStart(6, '0')}` : colorObj.getStyle();
-
-      const diffTex = makeCanvasTexture(`diff_${cacheKey}`, 512, 512, (ctx, w, h) => {
-        ctx.fillStyle = baseCss;
-        ctx.fillRect(0, 0, w, h);
-        if (type === 'wood') {
-          for (let y = 0; y < h; y += 4) {
-            const wave = Math.sin(y * 0.06) * 0.08;
-            ctx.fillStyle = y % 8 === 0 ? `rgba(0,0,0,${0.12 + wave * 0.3})` : 'rgba(255,255,255,0.06)';
-            ctx.fillRect(0, y, w, 2);
+    // V8 material pipeline: high-resolution albedo, independent tangent normals
+    // and roughness; cached to avoid duplicate canvases and GPU textures.
+    function getProceduralPBRMaterial(type, baseHex=0xffffff, roughness=0.5, metalness=0.05, repeat=2) {
+      const cacheKey=['pbr3',type,baseHex,roughness,metalness,repeat].join('_');
+      if(PBR_MAT_CACHE[cacheKey])return PBR_MAT_CACHE[cacheKey];
+      const wood=type==='wood', stone=type==='tile'||type==='stone';
+      const baseCss=typeof baseHex==='number'?'#'+baseHex.toString(16).padStart(6,'0'):new THREE.Color(baseHex).getStyle();
+      const dim=graphicsUltra?768:512, micro=graphicsUltra?384:256;
+      let seed=0x9e3779b9;
+      for(let i=0;i<cacheKey.length;i++)seed=Math.imul(seed^cacheKey.charCodeAt(i),0x45d9f3b);
+      function rand(){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return(seed>>>0)/4294967296;}
+      const diffuse=makeCanvasTexture('color3_'+cacheKey,dim,dim,(ctx,w,h)=>{
+        ctx.fillStyle=baseCss;ctx.fillRect(0,0,w,h);
+        if(wood){
+          for(let y=0;y<h;y+=2){
+            const wave=0.06+Math.sin(y*0.035+Math.sin(y*0.008)*2)*0.046;
+            ctx.fillStyle='rgba(27,15,6,'+Math.max(0.018,wave)+')';
+            ctx.fillRect(0,y,w,1+Math.floor(rand()*2));
+            if(rand()<0.3){ctx.fillStyle='rgba(255,248,221,0.075)';ctx.fillRect(0,y+1,w,1);}
           }
-          ctx.strokeStyle = 'rgba(28,12,2,0.35)';
-          ctx.lineWidth = 3;
-          for (let p = 0; p < w; p += 128) {
-            ctx.beginPath();
-            ctx.moveTo(p, 0);
-            ctx.lineTo(p, h);
-            ctx.stroke();
+          for(let i=1;i<4;i++){
+            const y=i*h/4;
+            ctx.strokeStyle='rgba(25,15,6,0.26)';ctx.lineWidth=3;
+            ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();
+            ctx.strokeStyle='rgba(255,244,213,0.18)';ctx.lineWidth=1;
+            ctx.beginPath();ctx.moveTo(0,y+4);ctx.lineTo(w,y+4);ctx.stroke();
           }
-        } else if (type === 'tile' || type === 'stone') {
-          for (let i = 0; i < 650; i++) {
-            ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.07)' : 'rgba(15,23,42,0.06)';
-            ctx.fillRect(Math.random() * w, Math.random() * h, 6, 6);
-          }
-          ctx.strokeStyle = 'rgba(15,23,42,0.22)';
-          ctx.lineWidth = 4;
-          const step = w / 2;
-          for (let gx = 0; gx < w; gx += step) {
-            for (let gy = 0; gy < h; gy += step) {
-              ctx.strokeRect(gx + 2, gy + 2, step - 4, step - 4);
-              ctx.strokeStyle = 'rgba(255,255,255,0.24)';
-              ctx.lineWidth = 2;
-              ctx.strokeRect(gx + 6, gy + 6, step - 12, step - 12);
-              ctx.strokeStyle = 'rgba(15,23,42,0.22)';
-              ctx.lineWidth = 4;
+          for(let i=0;i<3;i++){
+            const x=rand()*w,y=rand()*h;
+            for(let ring=0;ring<5;ring++){
+              ctx.beginPath();ctx.ellipse(x,y,6+ring*7,3+ring*4,0,0,Math.PI*2);
+              ctx.strokeStyle='rgba(33,20,9,'+(0.19-ring*0.027)+')';
+              ctx.lineWidth=1.5;ctx.stroke();
             }
           }
-        } else if (type === 'roof') {
-          for (let y = 0; y < h; y += 32) {
-            const grad = ctx.createLinearGradient(0, y, 0, y + 32);
-            grad.addColorStop(0, 'rgba(255,255,255,0.14)');
-            grad.addColorStop(1, 'rgba(0,0,0,0.24)');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, y, w, 32);
-            ctx.strokeStyle = 'rgba(0,0,0,0.32)';
-            ctx.lineWidth = 3;
-            for (let x = 0; x < w; x += 42) {
-              ctx.beginPath();
-              ctx.arc(x + 21, y + 6, 21, 0, Math.PI);
-              ctx.stroke();
+        } else if(stone){
+          const n=type==='tile'?3:2, tw=w/n;
+          for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+            const xx=x*tw,yy=y*tw;
+            const white=rand()>0.5;
+            ctx.fillStyle=white?'rgba(255,255,255,0.028)':'rgba(18,30,42,0.025)';
+            ctx.fillRect(xx+3,yy+3,tw-6,tw-6);
+            ctx.strokeStyle='rgba(32,44,56,0.28)';ctx.lineWidth=4;
+            ctx.strokeRect(xx+2,yy+2,tw-4,tw-4);
+            ctx.strokeStyle='rgba(255,255,255,0.20)';ctx.lineWidth=1;
+            ctx.strokeRect(xx+6,yy+6,tw-12,tw-12);
+          }
+          for(let i=0;i<w*h/270;i++){
+            ctx.fillStyle=rand()<0.48?'rgba(15,23,42,0.065)':'rgba(255,255,255,0.10)';
+            const r=1+rand()*2;ctx.fillRect(rand()*w,rand()*h,r,r);
+          }
+        } else if(type==='brick'){
+          const rh=h/12,rw=w/6;
+          ctx.strokeStyle='rgba(250,248,235,0.40)';ctx.lineWidth=3;
+          for(let y=0;y<12;y++){
+            const yy=y*rh;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(w,yy);ctx.stroke();
+            for(let x=-1;x<7;x++){
+              const xx=(x+0.5*(y%2))*rw;
+              ctx.beginPath();ctx.moveTo(xx,yy);ctx.lineTo(xx,yy+rh);ctx.stroke();
             }
           }
-        } else if (type === 'brick') {
-          ctx.strokeStyle = 'rgba(248,250,252,0.36)';
-          ctx.lineWidth = 3;
-          for (let y = 0; y < h; y += 32) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(w, y);
-            ctx.stroke();
-            const offset = (y / 32) % 2 === 0 ? 0 : 42;
-            for (let x = offset; x < w; x += 84) {
-              ctx.beginPath();
-              ctx.moveTo(x, y);
-              ctx.lineTo(x, y + 32);
-              ctx.stroke();
+        } else if(type==='roof'){
+          const band=h/13;
+          for(let y=0;y<13;y++){
+            const yy=y*band,g=ctx.createLinearGradient(0,yy,0,yy+band);
+            g.addColorStop(0,'rgba(255,255,255,0.16)');
+            g.addColorStop(1,'rgba(16,26,37,0.24)');
+            ctx.fillStyle=g;ctx.fillRect(0,yy,w,band);
+            ctx.strokeStyle='rgba(16,25,33,0.34)';ctx.lineWidth=2;
+            ctx.beginPath();ctx.moveTo(0,yy+band);ctx.lineTo(w,yy+band);ctx.stroke();
+            for(let x=0;x<w;x+=w/11){
+              ctx.beginPath();ctx.arc(x+w/22,yy+band*0.18,w/22,0,Math.PI);ctx.stroke();
             }
           }
-        } else if (type === 'grass') {
-          for (let i = 0; i < 1400; i++) {
-            ctx.fillStyle = i % 3 === 0 ? 'rgba(254,240,138,0.12)' : i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(6,78,59,0.16)';
-            ctx.fillRect(Math.random() * w, Math.random() * h, 2, 7);
+        } else if(type==='grass'){
+          for(let i=0;i<w*h/125;i++){
+            const r=rand();
+            ctx.strokeStyle=r>0.67?'rgba(249,242,187,0.17)':r>0.33?'rgba(9,77,40,0.25)':'rgba(255,255,255,0.10)';
+            ctx.lineWidth=0.7+rand();
+            const x=rand()*w,y=rand()*h;
+            ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+rand()*2-1,y-3-rand()*8);ctx.stroke();
           }
         }
       });
-
-      const roughTex = makeCanvasTexture(`rough_${cacheKey}`, 256, 256, (ctx, w, h) => {
-        ctx.fillStyle = '#b8b8b8';
-        ctx.fillRect(0, 0, w, h);
-        if (type === 'tile' || type === 'stone') {
-          ctx.fillStyle = '#686868';
-          ctx.fillRect(4, 4, w / 2 - 8, h / 2 - 8);
-          ctx.fillRect(w / 2 + 4, 4, w / 2 - 8, h / 2 - 8);
-          ctx.fillRect(4, h / 2 + 4, w / 2 - 8, h / 2 - 8);
-          ctx.fillRect(w / 2 + 4, h / 2 + 4, w / 2 - 8, h / 2 - 8);
-        } else if (type === 'wood') {
-          for (let y = 0; y < h; y += 6) {
-            ctx.fillStyle = y % 12 === 0 ? '#858585' : '#c4c4c4';
-            ctx.fillRect(0, y, w, 3);
+      // Height is generated in linear grayscale, NOT sampled from the sRGB albedo.
+      // Convert local gradients to a proper RGB tangent-space normal map.
+      const normalCanvas=document.createElement('canvas');
+      normalCanvas.width=micro;normalCanvas.height=micro;
+      const c=normalCanvas.getContext('2d'),height=new Uint8Array(micro*micro);
+      for(let y=0;y<micro;y++)for(let x=0;x<micro;x++){
+        const noise=Math.sin(x*0.13+y*0.07)+0.35*Math.sin(y*0.39-x*0.29);
+        const grain=wood?Math.sin(y*0.38+x*0.017)*0.4:0;
+        const sections=stone?(type==='tile'?3:2):0;
+        const grout=sections && (x%(micro/sections)<2 || y%(micro/sections)<2) ? -42:0;
+        height[y*micro+x]=Math.max(0,Math.min(255,128+noise*20+grain*17+grout+(rand()-0.5)*14));
+      }
+      const pixels=c.createImageData(micro,micro);
+      const sample=(x,y)=>height[((y+micro)%micro)*micro+((x+micro)%micro)]/255;
+      const factor=wood?0.95:stone?0.75:type==='grass'?1.22:0.8;
+      for(let y=0;y<micro;y++)for(let x=0;x<micro;x++){
+        const dx=(sample(x+1,y)-sample(x-1,y))*factor;
+        const dy=(sample(x,y+1)-sample(x,y-1))*factor;
+        const len=Math.hypot(dx,dy,1), i=4*(y*micro+x);
+        pixels.data[i]=Math.round(255*(0.5-0.5*dx/len));
+        pixels.data[i+1]=Math.round(255*(0.5-0.5*dy/len));
+        pixels.data[i+2]=Math.round(255*(0.5+0.5/len));
+        pixels.data[i+3]=255;
+      }
+      c.putImageData(pixels,0,0);
+      const normalTex=new THREE.CanvasTexture(normalCanvas);
+      const roughTex=makeCanvasTexture('rough3_'+cacheKey,micro,micro,(ctx,w,h)=>{
+        ctx.fillStyle='#eeeeee';ctx.fillRect(0,0,w,h);
+        for(let i=0;i<w*h/180;i++){
+          const shade=Math.round(209+rand()*35);
+          ctx.fillStyle='rgb('+shade+','+shade+','+shade+')';
+          ctx.fillRect(rand()*w,rand()*h,1+rand()*3,1+rand()*3);
+        }
+        if(stone){
+          const n=type==='tile'?3:2;
+          ctx.strokeStyle='#f9f9f9';ctx.lineWidth=2;
+          for(let i=0;i<=n;i++){const v=i*w/n;
+            ctx.beginPath();ctx.moveTo(v,0);ctx.lineTo(v,h);ctx.stroke();
+            ctx.beginPath();ctx.moveTo(0,v);ctx.lineTo(w,v);ctx.stroke();
           }
         }
       });
-
-      [diffTex, roughTex].forEach((t) => {
-        t.wrapS = THREE.RepeatWrapping;
-        t.wrapT = THREE.RepeatWrapping;
-        t.repeat.set(repeat, repeat);
+      [diffuse,normalTex,roughTex].forEach(tex=>{
+        tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(repeat,repeat);
+        tex.anisotropy=Math.min(graphicsUltra?12:6,renderer?.capabilities?.getMaxAnisotropy?.()||4);
       });
-
-      const mat = new THREE.MeshStandardMaterial({
-        map: diffTex,
-        bumpMap: diffTex,
-        bumpScale: 0.026,
-        roughnessMap: roughTex,
-        roughness,
-        metalness
+      const material=new THREE.MeshStandardMaterial({
+        map:diffuse,normalMap:normalTex,
+        normalScale:new THREE.Vector2(0.42,0.42),
+        roughnessMap:roughTex,roughness,
+        metalness:Math.min(metalness,wood?0.02:type==='grass'?0:0.16),
+        envMapIntensity:0.56
       });
-      PBR_MAT_CACHE[cacheKey] = mat;
-      return mat;
+      PBR_MAT_CACHE[cacheKey]=material;
+      return material;
     }
 
     function createSignBoard(text, bg = '#7f1d1d', border = '#facc15', textColor = '#fef08a', width = 4, height = 0.8, isVertical = false) {
