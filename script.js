@@ -1515,7 +1515,7 @@
     function upgradeStandingHuman(root, options) {
       // Sit animations are a separate rig requirement; do not force a walking
       // avatar onto a chair or it will recreate the distorted-leg bug.
-      if (options.isSeated) return;
+      if (options.isSeated || options.role === 'reader') return;
       const asset = getEnhancedHumanAsset(options.gender, options.role === 'teacher' || options.hasBouquet);
       if (!asset) return;
       asset.then(gltf => {
@@ -3826,7 +3826,7 @@
       // Reading corner: a student holds an opened book, follows each line
       // with their gaze and turns a physical page on a regular interval.
       room103Reader = createRealisticHuman({
-        gender:'female',role:'student',shirtColor:0xf8fafc,
+        gender:'female',role:'reader',shirtColor:0xf8fafc,
         hairColor:0x1c1917,hasBouquet:false
       });
       room103Reader.position.set(0.05,0,-0.05);
@@ -5349,29 +5349,61 @@
       document.getElementById('artwork-modal').classList.remove('hidden');
     }
 
-    function openAnthologyModal(bookIdx = 0, pageIdx = 0) {
-      currentAnthologyBookIdx = (bookIdx + ANTHOLOGY_BOOKS.length) % ANTHOLOGY_BOOKS.length;
-      const book = ANTHOLOGY_BOOKS[currentAnthologyBookIdx];
-      currentAnthologyPageIdx = (pageIdx + book.pages.length) % book.pages.length;
-      const page = book.pages[currentAnthologyPageIdx];
-
-      document.getElementById('anthology-chapter').textContent = book.name;
-      document.getElementById('anthology-title').textContent = page.title;
-      document.getElementById('anthology-body').textContent = page.body;
-      document.getElementById('anthology-author').textContent = `— ${page.author}`;
-      document.getElementById('anthology-counter').textContent = `${currentAnthologyPageIdx + 1} / ${book.pages.length}`;
-
-      document.querySelectorAll('.anthology-tab').forEach((btn, i) => {
-        if (i === currentAnthologyBookIdx) {
-          btn.classList.add('bg-amber-500', 'text-slate-950');
-          btn.classList.remove('bg-white/10');
-        } else {
-          btn.classList.remove('bg-amber-500', 'text-slate-950');
-          btn.classList.add('bg-white/10');
-        }
+    function renderAnthologySpread() {
+      const book=ANTHOLOGY_BOOKS[currentAnthologyBookIdx];
+      const page=book.pages[currentAnthologyPageIdx];
+      const words=String(page.body).split(/\s+/).filter(Boolean);
+      const mid=Math.ceil(words.length/2);
+      document.getElementById('anthology-chapter').textContent=book.name;
+      document.getElementById('anthology-title').textContent=page.title;
+      document.getElementById('anthology-body').textContent=words.slice(0,mid).join(' ');
+      document.getElementById('anthology-right-body').textContent=words.slice(mid).join(' ');
+      document.getElementById('anthology-author').textContent='— '+page.author;
+      document.getElementById('anthology-counter').textContent=
+        (currentAnthologyPageIdx+1)+' / '+book.pages.length;
+      document.getElementById('anthology-left-number').textContent=
+        String(currentAnthologyPageIdx*2+1).padStart(2,'0');
+      document.getElementById('anthology-right-number').textContent=
+        String(currentAnthologyPageIdx*2+2).padStart(2,'0');
+      document.querySelectorAll('.anthology-tab').forEach((tab,i)=>{
+        tab.classList.toggle('anthology-tab-active',i===currentAnthologyBookIdx);
+        tab.setAttribute('aria-current',i===currentAnthologyBookIdx?'page':'false');
       });
+    }
 
-      document.getElementById('anthology-modal').classList.remove('hidden');
+    function openAnthologyModal(bookIdx=0,pageIdx=0) {
+      const index=(bookIdx+ANTHOLOGY_BOOKS.length)%ANTHOLOGY_BOOKS.length;
+      const book=ANTHOLOGY_BOOKS[index];
+      const target=(pageIdx%book.pages.length+book.pages.length)%book.pages.length;
+      const modal=document.getElementById('anthology-modal');
+      const shell=document.getElementById('anthology-book-shell');
+      if(!modal||!shell||anthologyTurning)return;
+      const alreadyVisible=!modal.classList.contains('hidden');
+      const sameBook=index===currentAnthologyBookIdx;
+      if(alreadyVisible&&sameBook&&currentAnthologyPageIdx!==target) {
+        anthologyTurning=true;
+        const direction=pageIdx>currentAnthologyPageIdx?1:-1;
+        shell.classList.remove('turning-next','turning-prev');
+        // Force animation reset when immediately turning multiple pages.
+        void shell.offsetWidth;
+        shell.classList.add(direction>0?'turning-next':'turning-prev');
+        beginRoom103PageTurn(direction);
+        setTimeout(()=>{
+          currentAnthologyPageIdx=target;
+          renderAnthologySpread();
+        },320);
+        setTimeout(()=>{
+          shell.classList.remove('turning-next','turning-prev');
+          anthologyTurning=false;
+        },680);
+      }else{
+        currentAnthologyBookIdx=index;
+        currentAnthologyPageIdx=target;
+        renderAnthologySpread();
+        modal.classList.remove('hidden');
+        shell.classList.remove('turning-next','turning-prev');
+        beginRoom103PageTurn(1);
+      }
     }
 
     let currentPhotoZoom = 1;
@@ -6048,7 +6080,10 @@
       });
 
       const closeAnth = document.getElementById('btn-close-anthology');
-      if (closeAnth) closeAnth.addEventListener('click', () => document.getElementById('anthology-modal').classList.add('hidden'));
+      if (closeAnth) closeAnth.addEventListener('click', () => {
+        document.getElementById('anthology-modal').classList.add('hidden');
+        anthologySwipeStart=null;
+      });
       document.querySelectorAll('.anthology-tab').forEach((tab) => {
         tab.addEventListener('click', () => openAnthologyModal(Number(tab.getAttribute('data-book') || 0), 0));
       });
@@ -6056,6 +6091,31 @@
       if (prevAnth) prevAnth.addEventListener('click', () => openAnthologyModal(currentAnthologyBookIdx, currentAnthologyPageIdx - 1));
       const nextAnth = document.getElementById('btn-next-anthology');
       if (nextAnth) nextAnth.addEventListener('click', () => openAnthologyModal(currentAnthologyBookIdx, currentAnthologyPageIdx + 1));
+      const anthologyShell=document.getElementById('anthology-book-shell');
+      if(anthologyShell) {
+        anthologyShell.addEventListener('pointerdown',e=>{
+          anthologySwipeStart={id:e.pointerId,x:e.clientX,y:e.clientY};
+        });
+        anthologyShell.addEventListener('pointerup',e=>{
+          if(!anthologySwipeStart || e.pointerId!==anthologySwipeStart.id)return;
+          const dx=e.clientX-anthologySwipeStart.x;
+          const dy=e.clientY-anthologySwipeStart.y;
+          anthologySwipeStart=null;
+          if(Math.abs(dx)>55 && Math.abs(dx)>Math.abs(dy)*1.2)
+            openAnthologyModal(currentAnthologyBookIdx,currentAnthologyPageIdx+(dx<0?1:-1));
+        });
+        anthologyShell.addEventListener('pointercancel',()=>{anthologySwipeStart=null;});
+      }
+      window.addEventListener('keydown',e=>{
+        const modal=document.getElementById('anthology-modal');
+        if(!modal||modal.classList.contains('hidden'))return;
+        if(e.code==='ArrowRight'||e.code==='ArrowLeft'){
+          e.preventDefault();e.stopPropagation();
+          openAnthologyModal(currentAnthologyBookIdx,currentAnthologyPageIdx+(e.code==='ArrowRight'?1:-1));
+        }else if(e.code==='Escape'){
+          e.preventDefault();modal.classList.add('hidden');
+        }
+      },true);
 
       ['btn-close-photo-zoom', 'btn-ok-photo-zoom'].forEach((id) => {
         const el = document.getElementById(id);
