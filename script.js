@@ -593,7 +593,7 @@
       povHands.visible = !!active;
       if (!active) return;
       const g=room101GiftAnim || room301GiftAnim;
-      const reach=g ? smooth01((g.progress-0.54)/0.23)*(1-smooth01((g.progress-0.79)/0.15)) : 0;
+      const reach=g ? smooth01((g.progress-0.48)/0.25)*(1-smooth01((g.progress-0.78)/0.15)) : 0;
       const step=roomHero.userData.walkBlend||0;
       povHands.position.set(0, reach*0.11+Math.sin(elapsed*8)*0.006*step, -reach*0.19);
       if(povBouquet) povBouquet.visible=!!roomHero.userData.bouquetMesh?.visible;
@@ -622,9 +622,10 @@
       } catch (e) { console.warn('Audio chime:', e); }
     }
 
-    function speakVietnamese(text) {
+    function speakVietnamese(text, onComplete = null) {
       lastSpeechText = String(text || '').trim();
-      if (!audioEnabled || !lastSpeechText || !('speechSynthesis' in window)) return;
+      const done = () => { speechPlaying = false; if (typeof onComplete === 'function') onComplete(); };
+      if (!audioEnabled || !lastSpeechText || !('speechSynthesis' in window)) { done(); return false; }
       try {
         window.speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(lastSpeechText);
@@ -632,12 +633,14 @@
         const vn = voices.find(v => /^vi[-_]/i.test(v.lang)) || voices.find(v => /viet/i.test(v.name));
         if (vn) u.voice = vn;
         u.lang = 'vi-VN'; u.rate = 0.88; u.pitch = 1.01; u.volume = 1;
+        let completed = false;
         u.onstart = () => { speechPlaying = true; };
-        u.onend = u.onerror = () => { speechPlaying = false; };
+        u.onend = u.onerror = () => { if (!completed) { completed = true; done(); } };
         window.speechSynthesis.speak(u);
-        // Chrome can leave speechSynthesis paused after its first interaction.
+        // The user already initiated the ceremony by clicking; only start speaking at the proper stage.
         window.speechSynthesis.resume();
-      } catch (e) { speechPlaying = false; console.warn('Thuyết minh:', e); }
+        return true;
+      } catch (e) { console.warn('Thuyết minh:', e); done(); return false; }
     }
 
     function updateHeaderStatus(title) {
@@ -1659,8 +1662,13 @@
         lowerPivot.add(sole);
 
         if (isSeated) {
-          hipPivot.rotation.x = Math.PI / 2;
-          lowerPivot.rotation.x = -Math.PI / 2;
+          // Local forward is +Z; the student meshes face -Z when rotated by PI.
+          // Correct sitting pose: thighs extend FORWARD, shins drop straight to the floor.
+          hipPivot.rotation.x = -Math.PI / 2;
+          lowerPivot.rotation.x = Math.PI / 2;
+          const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), pantsMat);
+          kneeCap.position.set(0, 0, 0);
+          lowerPivot.add(kneeCap);
         }
 
         hipPivot.userData.lowerPivot = lowerPivot;
@@ -1676,7 +1684,7 @@
         rightArm.rotation.x = -0.45;
       }
 
-      root.userData = { leftLeg, rightLeg, leftArm, rightArm, headGroup, bouquetMesh };
+      root.userData = { leftLeg, rightLeg, leftArm, rightArm, headGroup, bouquetMesh, isSeated };
       return root;
     }
 
@@ -4401,6 +4409,7 @@
     function switchSceneMode(mode) {
       // This is a virtual scene cut: the avatar never jumps through opaque geometry on screen.
       sceneMode = mode;
+      if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); speechPlaying = false; }
       interiorColliders = [];
       heroVelocity.set(0, 0, 0);
       transitionLock = false;
@@ -4703,66 +4712,118 @@
       const teacherFlowers = teacher.userData.bouquetMesh;
       if (studentFlowers) studentFlowers.visible = true;
       if (teacherFlowers) teacherFlowers.visible = false;
-      // Consistent choreography: approach -> stop -> offer -> receive -> bow.
+
+      const receiver = currentBuildingSide === 'female' ? 'cô' : 'thầy';
+      const targetZ = whichRoom === 'room101' ? -3.22 : -3.25;
+      const walkDistance = Math.hypot(roomHero.position.x, roomHero.position.z - targetZ);
       const gift = {
-        progress: 0, delivered: false,
+        stage: 'walk', stageTime: 0, progress: 0,
+        delivered: false, studentSpoken: false, studentDone: false,
+        teacherSpoken: false, teacherDone: false,
         startX: roomHero.position.x, startZ: roomHero.position.z,
-        targetX: 0,
-        targetZ: whichRoom === 'room101' ? -3.22 : -3.25,
+        targetX: 0, targetZ,
+        walkDuration: Math.max(2.5, Math.min(7, walkDistance / 1.35)),
+        studentLine: `Thưa ${receiver}, em xin kính tặng ${receiver} bó hoa nhân ngày Nhà giáo Việt Nam 20 tháng 11. Em cảm ơn ${receiver} ạ!`,
+        teacherLine: currentBuildingSide === 'female'
+          ? 'Cô cảm ơn em. Cô chúc em luôn tự tin và học tập thật tốt nhé!'
+          : 'Thầy cảm ơn em. Chúc em luôn chăm ngoan, học giỏi và vững bước trên hành trình phía trước!',
         teacher, whichRoom
       };
       if (whichRoom === 'room101') room101GiftAnim = gift;
       else room301GiftAnim = gift;
-      const receiver = currentBuildingSide === 'female' ? 'cô' : 'thầy';
-      const line = `Em kính tặng ${receiver} bó hoa nhân ngày Nhà giáo Việt Nam. Em xin cảm ơn ${receiver} ạ!`;
-      showSpeechCard('Học sinh • Lời tri ân',line);
-      // Speak immediately from the real click, avoiding autoplay restrictions.
-      speakVietnamese(line);
-      playChime(650,0.16);
+      resetHeroMotion();
+      // No greeting or voiceover during the approach.
+      showSpeechCard('Hành trình tặng hoa', `Học sinh đang mang bó hoa đến chỗ ${receiver} giáo…`);
+      // Unlock the existing audio context while the original click gesture is active.
+      if (sharedAudioContext && sharedAudioContext.state === 'suspended') sharedAudioContext.resume();
+      playChime(520, 0.10);
     }
 
     function triggerRoom101Gift() { startGiftCeremony('room101'); }
     function triggerRoom301Gift() { startGiftCeremony('room301'); }
 
     function updateGiftCeremony(g, dt, elapsed) {
-      g.progress = Math.min(1, g.progress + dt / 7.0);
-      const p = g.progress;
-      const approach = easeInOut(Math.min(1,p/0.54));
-      roomHero.position.x = THREE.MathUtils.lerp(g.startX,g.targetX,approach);
-      roomHero.position.z = THREE.MathUtils.lerp(g.startZ,g.targetZ,approach);
-      // Face teacher for the entire gift, without drifting into the teacher's body.
-      roomHero.rotation.y = THREE.MathUtils.lerp(roomHero.rotation.y, Math.PI, Math.min(1,dt*6));
-      const reach = smooth01((p-0.54)/0.22);
-      const relax = 1 - smooth01((p-0.79)/0.15);
-      const hand = reach * relax;
-      if (p < 0.54) animateHumanWalk(roomHero,elapsed,8,dt);
-      else animateHumanWalk(roomHero,elapsed,0,dt);
-      if (roomHero.userData.rightArm) roomHero.userData.rightArm.rotation.x = -0.15 - hand*0.95;
-      if (g.teacher.userData.rightArm) g.teacher.userData.rightArm.rotation.x = -0.15 - hand*1.02;
-      if (roomHero.userData.leftArm) roomHero.userData.leftArm.rotation.x = -hand*0.28;
-      if (g.teacher.userData.leftArm) g.teacher.userData.leftArm.rotation.x = -hand*0.18;
-      if (!g.delivered && p >= 0.755) {
-        g.delivered = true;
-        if (roomHero.userData.bouquetMesh) roomHero.userData.bouquetMesh.visible = false;
-        if (g.teacher.userData.bouquetMesh) g.teacher.userData.bouquetMesh.visible = true;
-        playChime(880,0.22);
-        giftBloom = { time: 0, origin: g.teacher.position.clone() };
-        const answer = currentBuildingSide === 'female'
-          ? 'Cô cảm ơn em. Cô chúc em luôn tự tin và học tập thật tốt nhé!'
-          : 'Thầy cảm ơn em. Chúc em luôn chăm ngoan, học giỏi và vững bước trên hành trình phía trước!';
-        showSpeechCard('Giáo viên • Lời đáp',answer);
-        speakVietnamese(answer);
+      if (!g || !roomHero || !g.teacher) return;
+      g.stageTime += dt;
+      const pupil = roomHero.userData;
+      const teacher = g.teacher.userData;
+
+      if (g.stage === 'walk') {
+        const t = smooth01(g.stageTime / g.walkDuration);
+        g.progress = t * 0.48;
+        roomHero.position.x = THREE.MathUtils.lerp(g.startX, g.targetX, t);
+        roomHero.position.z = THREE.MathUtils.lerp(g.startZ, g.targetZ, t);
+        roomHero.rotation.y = THREE.MathUtils.lerp(roomHero.rotation.y, Math.PI, Math.min(1, dt * 7));
+        animateHumanWalk(roomHero, elapsed, 8, dt);
+        // The bouquet stays in the student's hand, held in front of the body.
+        if (pupil.rightArm) pupil.rightArm.rotation.x = -0.38;
+        if (pupil.bouquetMesh) pupil.bouquetMesh.visible = true;
+        if (g.stageTime >= g.walkDuration) {
+          roomHero.position.set(g.targetX, roomHero.position.y, g.targetZ);
+          resetHeroMotion();
+          g.stage = 'offer';
+          g.stageTime = 0;
+          g.progress = 0.48;
+        }
+        return;
       }
-      if (p > 0.81 && roomHero.userData.headGroup) {
-        roomHero.userData.headGroup.rotation.x = smooth01((p-0.81)/0.07) * (1-smooth01((p-0.91)/0.06)) * 0.22;
+
+      if (g.stage === 'offer') {
+        animateHumanWalk(roomHero, elapsed, 0, dt);
+        const reach = smooth01(g.stageTime / 0.95);
+        g.progress = 0.48 + 0.25 * reach;
+        if (pupil.rightArm) pupil.rightArm.rotation.x = -0.38 - reach * 0.70;
+        if (teacher.rightArm) teacher.rightArm.rotation.x = -0.12 - reach * 0.92;
+        if (pupil.leftArm) pupil.leftArm.rotation.x = -reach * 0.12;
+        if (!g.studentSpoken && g.stageTime >= 0.68) {
+          g.studentSpoken = true;
+          showSpeechCard('Học sinh • Lời tri ân', g.studentLine);
+          speakVietnamese(g.studentLine, () => { g.studentDone = true; });
+        }
+        // Keep the bouquet in the pupil's hand while the pupil is speaking.
+        if (g.stageTime >= 1.65 && (g.studentDone || g.stageTime >= 7.5)) {
+          g.delivered = true;
+          if (pupil.bouquetMesh) pupil.bouquetMesh.visible = false;
+          if (teacher.bouquetMesh) teacher.bouquetMesh.visible = true;
+          giftBloom = { time: 0, origin: g.teacher.position.clone() };
+          playChime(820, 0.18);
+          g.stage = 'receive';
+          g.stageTime = 0;
+          g.progress = 0.74;
+        }
+        return;
       }
-      if (p >= 1) {
-        g.teacher.userData.rightArm.rotation.x = -0.22; // holds the gift close to torso
-        roomHero.userData.rightArm.rotation.x = 0;
-        roomHero.userData.leftArm.rotation.x = 0;
-        roomHero.userData.headGroup.rotation.x = 0;
-        if (g.whichRoom === 'room101') room101GiftAnim = null;
-        else room301GiftAnim = null;
+
+      if (g.stage === 'receive') {
+        const settle = smooth01(g.stageTime / 1.1);
+        g.progress = 0.74 + settle * 0.12;
+        if (pupil.rightArm) pupil.rightArm.rotation.x = -1.08 + settle * 0.82;
+        if (teacher.rightArm) teacher.rightArm.rotation.x = -1.04 + settle * 0.70;
+        if (!g.teacherSpoken && g.stageTime >= 0.55) {
+          g.teacherSpoken = true;
+          showSpeechCard('Giáo viên • Lời đáp', g.teacherLine);
+          speakVietnamese(g.teacherLine, () => { g.teacherDone = true; });
+        }
+        if (g.stageTime >= 1.55 && (g.teacherDone || g.stageTime >= 8.0)) {
+          g.stage = 'bow';
+          g.stageTime = 0;
+        }
+        return;
+      }
+
+      if (g.stage === 'bow') {
+        const t = Math.min(1, g.stageTime / 1.4);
+        g.progress = 0.86 + t * 0.14;
+        if (pupil.headGroup) pupil.headGroup.rotation.x = Math.sin(Math.PI * t) * 0.24;
+        if (pupil.rightArm) pupil.rightArm.rotation.x = -0.26 * (1 - t);
+        if (teacher.rightArm) teacher.rightArm.rotation.x = -0.34;
+        if (t >= 1) {
+          if (pupil.headGroup) pupil.headGroup.rotation.x = 0;
+          if (pupil.leftArm) pupil.leftArm.rotation.x = 0;
+          if (pupil.rightArm) pupil.rightArm.rotation.x = 0;
+          if (g.whichRoom === 'room101') room101GiftAnim = null;
+          else room301GiftAnim = null;
+        }
       }
     }
 
@@ -5000,6 +5061,8 @@
     // =========================================================================
     function animateHumanWalk(char, elapsed, speed = 8, dt = 0.016, amount = 1) {
       if (!char || !char.userData) return;
+      // A seated character must not inherit walking leg rotations.
+      if (char.userData.isSeated) return;
       const data=char.userData;
       const moving=speed>0.5;
       const a=1-Math.exp(-dt*8.5);
