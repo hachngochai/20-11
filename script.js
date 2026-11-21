@@ -2766,7 +2766,7 @@
       return { group, pivots: { left: leftPivot, right: rightPivot } };
     }
 
-    function createCenterTwoFlightStaircase(group, upType, downType) {
+    function createCenterTwoFlightStaircase(group, actionType) {
       const stairGroup = new THREE.Group();
       stairGroup.position.set(0, 0, 0.80);
       const stone = getProceduralPBRMaterial('tile', 0x64748b, 0.65, 0.025, 2);
@@ -2781,7 +2781,7 @@
       function box(w,h,d,x,y,z,mat,interactive=false) {
         const obj = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
         obj.position.set(x,y,z); obj.castShadow = true; obj.receiveShadow = true;
-        if(interactive && upType) obj.userData.interactiveType=upType;
+        if(interactive && actionType) obj.userData.interactiveType=actionType;
         stairGroup.add(obj); return obj;
       }
       // Stairwell walls leave the front entry unobstructed.
@@ -2846,35 +2846,81 @@
       for(let x=-1.9;x<=1.9;x+=0.48)
         pipe([x,totalRise,-3.72],[x,totalRise+0.94,-3.72],0.017,steel);
 
-      if(downType){
-        const downMarker=box(1.35,0.04,0.40,-1.04,0.025,0.62,stone);
-        downMarker.userData.interactiveType=downType;
-      }
       group.add(stairGroup);
     }
 
-    function buildHallwayCorridorShell(targetGroup, floorColor = 0xe2e8f0) {
-      const theme = getActiveBuildingTheme();
-      const floor = new THREE.Mesh(
-        new THREE.BoxGeometry(26, 0.2, 7.2),
-        getProceduralPBRMaterial('tile', floorColor, 0.34, 0.06, 8)
-      );
-      floor.position.set(0, -0.1, 0.2);
-      floor.receiveShadow = true;
-      targetGroup.add(floor);
 
-      // An open central stairwell avoids clipping through a solid ceiling.
-      const ceilingMaterial=new THREE.MeshStandardMaterial({color:0xf5f5f4,roughness:0.82});
-      [-7.6,7.6].forEach(cx=>{
-        const section=new THREE.Mesh(new THREE.BoxGeometry(10.8,0.2,7.2),ceilingMaterial);
-        section.position.set(cx,3.9,0.2);
-        targetGroup.add(section);
-      });
-      [-2.2,2.2].forEach(cx=>{
-        const beam=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.24,7.2),ceilingMaterial);
-        beam.position.set(cx,3.9,0.2);
-        targetGroup.add(beam);
-      });
+    // Physical vertical alignment between floors:
+    // stairwell A: F1 up at +3m -> F2 down at +3m.
+    // stairwell B: F2 up at -3m -> F3 down at -3m.
+    // Never show an upward stairwell on the top floor.
+    const HALL_STAIR = {
+      landingY: 3.80,
+      up: { hallway: 3.0, hallway2: -3.0 },
+      down: { hallway2: 3.0, hallway3: -3.0 },
+      shaftHalfWidth: 2.25,
+      cutoutZ0: -3.4,
+      cutoutZ1: 1.05
+    };
+
+    function createHallwayStairLayout(targetGroup, level) {
+      const upAction = level === 1 ? 'stairs_up_2' : level === 2 ? 'stairs_up_3' : null;
+      const downAction = level === 2 ? 'stairs_down_1' : level === 3 ? 'stairs_down_2' : null;
+      const upX = level === 1 ? 3 : -3;
+      const downX = level === 2 ? 3 : -3;
+      if (upAction) {
+        const upper = new THREE.Group();
+        upper.position.x = upX;
+        createCenterTwoFlightStaircase(upper, upAction);
+        targetGroup.add(upper);
+        registerCollider(upX, -1.17, 4.30, 4.23, 0.02);
+        const sign = createSignBoard('LÊN TẦNG ' + (level + 1), '#164e63', '#38bdf8', '#f8fafc', 2.20, 0.39);
+        sign.position.set(upX + 1.04, 2.15, 1.30);
+        targetGroup.add(sign);
+      }
+      if (downAction) {
+        // Re-use exactly the same flight geometry at the elevation below the
+        // current floor. The uppermost tread is level with the current floor.
+        // A real cutout in the corridor slab exposes the descending steps.
+        const lower = new THREE.Group();
+        lower.position.set(downX, -HALL_STAIR.landingY, 0);
+        createCenterTwoFlightStaircase(lower, downAction);
+        targetGroup.add(lower);
+        registerCollider(downX, -1.17, 4.30, 4.23, 0.02);
+        const sign = createSignBoard('XUỐNG TẦNG ' + (level - 1), '#78350f', '#fbbf24', '#fff7ed', 2.25, 0.39);
+        sign.position.set(downX - 1.04, 2.15, 1.30);
+        targetGroup.add(sign);
+      }
+    }
+
+    function buildHallwayCorridorShell(targetGroup, floorColor = 0xe2e8f0, level = 1) {
+      const theme = getActiveBuildingTheme();
+      // Corridor slabs have different openings at each floor. A down stair
+      // needs a hole in the FLOOR, an up stair needs a hole in the CEILING.
+      const stoneFloor = getProceduralPBRMaterial('tile', floorColor, 0.34, 0.06, 8);
+      const ceilingMaterial = new THREE.MeshStandardMaterial({ color: 0xf5f5f4, roughness: 0.83 });
+      const floorHoleX = level === 2 ? 3 : level === 3 ? -3 : null;
+      const ceilingHoleX = level === 1 ? 3 : level === 2 ? -3 : null;
+      function makePanel(x0,x1,z0,z1,y,material) {
+        if(x1 - x0 < 0.04 || z1 - z0 < 0.04) return;
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(x1-x0,0.2,z1-z0),material);
+        panel.position.set((x0+x1)/2,y,(z0+z1)/2);
+        panel.receiveShadow=true;
+        targetGroup.add(panel);
+      }
+      function makeSlab(y, material, holeX) {
+        if(holeX === null) {
+          makePanel(-13,13,-3.4,3.8,y,material);
+          return;
+        }
+        const xMin=holeX-HALL_STAIR.shaftHalfWidth, xMax=holeX+HALL_STAIR.shaftHalfWidth;
+        makePanel(-13,xMin,-3.4,3.8,y,material);
+        makePanel(xMax,13,-3.4,3.8,y,material);
+        makePanel(xMin,xMax,-3.4,HALL_STAIR.cutoutZ0,y,material);
+        makePanel(xMin,xMax,HALL_STAIR.cutoutZ1,3.8,y,material);
+      }
+      makeSlab(-0.10, stoneFloor, floorHoleX);
+      makeSlab(3.90, ceilingMaterial, ceilingHoleX);
 
       [-8.5, -3.8, 3.8, 8.5].forEach((lx) => {
         const led = new THREE.Mesh(
@@ -2938,7 +2984,7 @@
       });
 
       // Corridor Benches, Potted Plants, Bulletin Boards & Lively Students
-      [-11.4, -2.5, 2.5, 11.4].forEach((px) => {
+      [-11.4, 11.4].forEach((px) => {
         const plant = createPottedIndoorPlant(0.95);
         plant.position.set(px, 0, -2.9);
         targetGroup.add(plant);
@@ -3134,13 +3180,13 @@
       const theme = getActiveBuildingTheme();
       while (hallwayGroup.children.length > 0) hallwayGroup.remove(hallwayGroup.children[0]);
 
-      buildHallwayCorridorShell(hallwayGroup, 0xe2e8f0);
+      buildHallwayCorridorShell(hallwayGroup, 0xe2e8f0, 1);
 
       const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 1`, theme.signBg, theme.signBorder, '#ffffff', 5.8, 0.56);
       banner.position.set(0, 3.45, -3.45);
       hallwayGroup.add(banner);
 
-      createCenterTwoFlightStaircase(hallwayGroup, 'stairs_up_2', 'exit_to_campus');
+      createHallwayStairLayout(hallwayGroup, 1);
 
       const d101 = createModernDoubleDoor(-9.2, -3.38, 'enter_101', currentBuildingSide === 'female' ? 'PHÒNG 101 • TRANG TRÍ' : 'PHÒNG 101 • TRI ÂN');
       const d102 = createModernDoubleDoor(-4.6, -3.38, 'enter_102', currentBuildingSide === 'female' ? 'PHÒNG 102 • CUSTOM LỚP' : 'PHÒNG 102 • BÀI GIẢNG');
@@ -3612,13 +3658,13 @@
       const theme = getActiveBuildingTheme();
       while (hallway2Group.children.length > 0) hallway2Group.remove(hallway2Group.children[0]);
 
-      buildHallwayCorridorShell(hallway2Group, 0xe2e8f0);
+      buildHallwayCorridorShell(hallway2Group, 0xe2e8f0, 2);
 
       const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 2`, theme.signBg, theme.signBorder, '#ffffff', 5.8, 0.56);
       banner.position.set(0, 3.45, -3.45);
       hallway2Group.add(banner);
 
-      createCenterTwoFlightStaircase(hallway2Group, 'stairs_up_3', 'stairs_down_1');
+      createHallwayStairLayout(hallway2Group, 2);
 
       const d201 = createModernDoubleDoor(
         -6.8,
@@ -3989,13 +4035,13 @@
       const theme = getActiveBuildingTheme();
       while (hallway3Group.children.length > 0) hallway3Group.remove(hallway3Group.children[0]);
 
-      buildHallwayCorridorShell(hallway3Group, 0xfef3c7);
+      buildHallwayCorridorShell(hallway3Group, 0xfef3c7, 3);
 
       const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 3`, theme.signBg, theme.signBorder, '#ffffff', 5.8, 0.56);
       banner.position.set(0, 3.45, -3.45);
       hallway3Group.add(banner);
 
-      createCenterTwoFlightStaircase(hallway3Group, null, 'stairs_down_2');
+      createHallwayStairLayout(hallway3Group, 3);
 
       const d301 = createModernDoubleDoor(
         -6.8,
