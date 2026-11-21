@@ -3548,6 +3548,60 @@
       });
     }
 
+    function addClassroomBoardTrim(targetGroup, board, width, height, isSlide=false) {
+      // A separate slim frame must never cover the board texture or intercept
+      // touch swipes on the projected Room 102 screen.
+      const cx=board.position.x,cy=board.position.y,cz=board.position.z;
+      const front=cz + 0.065;
+      const rim=new THREE.MeshStandardMaterial({
+        color:isSlide?0x374151:0x865b35,roughness:isSlide?0.46:0.61,
+        metalness:isSlide?0.50:0.08
+      });
+      const inner=new THREE.MeshStandardMaterial({
+        color:isSlide?0xb7c5d2:0xc59b66,metalness:isSlide?0.55:0.20,roughness:0.46
+      });
+      const metal=new THREE.MeshStandardMaterial({
+        color:0xabb7c3,metalness:0.72,roughness:0.37
+      });
+      function strip(w,h,d,x,y,z,mat){
+        const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+        mesh.position.set(x,y,z);
+        mesh.castShadow=true;mesh.receiveShadow=true;
+        // The board remains the only interactive surface.
+        targetGroup.add(mesh);
+        return mesh;
+      }
+      for(const side of [-1,1]){
+        const x=cx+side*(width/2+0.04);
+        strip(0.086,height+0.18,0.09,x,cy,front,rim);
+        strip(0.015,height+0.05,0.046,cx+side*(width/2-0.012),cy,front+0.026,inner);
+      }
+      for(const side of [-1,1]){
+        const y=cy+side*(height/2+0.04);
+        strip(width+0.25,0.09,0.09,cx,y,front,rim);
+        strip(width+0.05,0.018,0.042,cx,cy+side*(height/2-0.009),front+0.025,inner);
+      }
+      // Practical chalk tray or wall-mounted screen shelf, out of the image.
+      const trayY=cy-height/2-0.105;
+      strip(width+0.13,0.025,isSlide?0.17:0.21,cx,trayY,front+0.10,metal);
+      strip(width+0.08,0.013,0.025,cx,trayY+0.018,front+0.19,inner);
+      if(!isSlide){
+        const chalkColor=new THREE.MeshStandardMaterial({color:0xf7f4e6,roughness:0.95});
+        const greenChalk=new THREE.MeshStandardMaterial({color:0xb2e4d0,roughness:0.92});
+        for(const [dx,mat] of [[-1.7,chalkColor],[-1.52,greenChalk]]){
+          strip(0.12,0.018,0.022,cx+dx,trayY+0.025,front+0.10,mat);
+        }
+        strip(0.22,0.034,0.13,cx+1.7,trayY+0.035,front+0.09,rim);
+      }else{
+        // Projector housing with a subdued status LED, no fake opaque overlay.
+        const light=new THREE.MeshStandardMaterial({
+          color:0xa7e3d9,emissive:0x1d907b,emissiveIntensity:0.24,roughness:0.45
+        });
+        strip(0.05,0.026,0.022,cx+width/2-0.16,
+          cy-height/2-0.11,front+0.2,light);
+      }
+    }
+
     function buildRoom101() {
       const theme = getActiveBuildingTheme();
       while (classroomGroup.children.length > 0) classroomGroup.remove(classroomGroup.children[0]);
@@ -3589,6 +3643,7 @@
       board.position.set(0, 1.95, -5.78);
       board.userData = { interactiveType: 'chalkboard_wish' };
       classroomGroup.add(board);
+      addClassroomBoardTrim(classroomGroup,board,5.6,1.95,false);
       room101BoardMesh = board;
       if (room101SavedWishes.length > 0) {
         updateRoom101ChalkboardWish(room101SavedWishes[room101SavedWishes.length - 1]);
@@ -3755,6 +3810,7 @@
       room102SlideMesh.position.set(0.45, 1.95, -5.8);
       room102SlideMesh.userData.interactiveType = 'room102_slide_touch';
       classroomGroup.add(room102SlideMesh);
+      addClassroomBoardTrim(classroomGroup,room102SlideMesh,5.0,2.25,true);
       initRoom102Slides();
 
       const magSign = createSignBoard('BÁO TƯỜNG TRI ÂN 20/11', '#881337', '#fda4af', '#fff1f2', 2.4, 1.55);
