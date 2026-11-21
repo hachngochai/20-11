@@ -307,6 +307,42 @@
       if (el) el.classList.toggle('is-active', !!on);
     }
 
+    function createSceneClearancePlanner(roomWidth=14, roomDepth=12) {
+      const reserved=[];
+      const intersects=(a,b)=>a.minX<b.maxX && a.maxX>b.minX && a.minZ<b.maxZ && a.maxZ>b.minZ;
+      function footprint(x,z,w,d,padding=0.12) {
+        return {minX:x-w/2-padding,maxX:x+w/2+padding,
+                minZ:z-d/2-padding,maxZ:z+d/2+padding};
+      }
+      function allowed(box) {
+        const inset=0.25;
+        return box.minX>=-roomWidth/2+inset && box.maxX<=roomWidth/2-inset &&
+               box.minZ>=-roomDepth/2+inset && box.maxZ<=roomDepth/2-inset &&
+               !reserved.some(item=>intersects(box,item.box));
+      }
+      function reserve(label,x,z,w,d,padding=0.12) {
+        const box=footprint(x,z,w,d,padding);
+        if(!allowed(box))console.warn('[Layout clearance]',label,'is close to another fixture');
+        reserved.push({label,box});
+        return {x,z};
+      }
+      function find(label,x,z,w,d,padding=0.12,maxDisplacement=1.15) {
+        const orig=footprint(x,z,w,d,padding);
+        if(allowed(orig)){reserved.push({label,box:orig});return {x,z};}
+        for(let radius=0.16;radius<=maxDisplacement;radius+=0.16){
+          for(let a=0;a<16;a++){
+            const angle=2*Math.PI*a/16;
+            const nx=x+Math.cos(angle)*radius,nz=z+Math.sin(angle)*radius;
+            const box=footprint(nx,nz,w,d,padding);
+            if(allowed(box)){reserved.push({label,box});return {x:nx,z:nz};}
+          }
+        }
+        console.warn('[Layout clearance] no safe position for',label);
+        return null; // Do not silently place an overlapping object.
+      }
+      return {reserve,find,footprints:reserved};
+    }
+
     function registerCollider(x, z, width, depth, padding = 0.26) {
       interiorColliders.push({ minX: x - width/2 - padding, maxX: x + width/2 + padding,
                                minZ: z - depth/2 - padding, maxZ: z + depth/2 + padding });
@@ -1457,7 +1493,7 @@
         new THREE.MeshBasicMaterial({ map: clockTex })
       );
       clockMesh.rotation.x = Math.PI / 2;
-      clockMesh.position.set(0, 0.56, 0);
+      clockMesh.position.set(3.45, 0.05, 0.075);
       group.add(clockMesh);
 
       const slogan = createSignBoard(sloganText, bgHex, '#facc15', '#fef08a', 4.6, 0.42);
@@ -3394,7 +3430,7 @@
         new THREE.BoxGeometry(5.6, 1.95, 0.1),
         new THREE.MeshBasicMaterial({ map: boardTex })
       );
-      board.position.set(0, 1.95, -5.82);
+      board.position.set(0, 1.95, -5.78);
       board.userData = { interactiveType: 'chalkboard_wish' };
       classroomGroup.add(board);
       room101BoardMesh = board;
@@ -3666,9 +3702,9 @@
       for(let i=0;i<5;i++)
         addBox(0.57,0.002,0.45,0,0.016+i*0.018,0,pagesMat);
       const top=new THREE.Mesh(new THREE.PlaneGeometry(0.62,0.46),
-        new THREE.MeshBasicMaterial({map:makeAnthologyCoverTexture(index),side:THREE.DoubleSide}));
+        new THREE.MeshBasicMaterial({map:makeAnthologyCoverTexture(index),side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
       top.rotation.x=-Math.PI/2;
-      top.position.set(0,0.131,0);
+      top.position.set(0,0.141,0);
       top.userData={interactiveType:'open_anthology',bookIndex:index};
       group.add(top);
       const glint=new THREE.Mesh(new THREE.BoxGeometry(0.008,0.008,0.48),trimMat);
@@ -3761,6 +3797,10 @@
       titleSign.position.set(0, 3.28, -5.82);
       classroomGroup.add(titleSign);
 
+      const clearance=createSceneClearancePlanner(14,12);
+      // Keep the main entrance unobstructed; only freestanding elements compete
+      // for floor space. Wall-mounted artwork is intentionally excluded.
+      clearance.reserve('main entrance',0,5.18,2.4,0.68,0.08);
       // Decorative red carpet runner & velvet benches & plants
       const runner = new THREE.Mesh(
         new THREE.BoxGeometry(3.2, 0.02, 8.6),
@@ -3771,14 +3811,20 @@
 
       [[-5.8, -5.0], [5.8, -5.0], [-5.8, 4.8], [5.8, 4.8]].forEach(([px, pz]) => {
         const plant = createPottedIndoorPlant(1.05);
-        plant.position.set(px, 0, pz);
+        const spot=clearance.find('plant',px,pz,0.62,0.62,0.08);
+        if(!spot)return;
+        plant.position.set(spot.x,0,spot.z);
         classroomGroup.add(plant);
+        registerCollider(spot.x,spot.z,0.56,0.56,0.10);
       });
 
       [-2.2, 2.2].forEach((bx) => {
         const bench = createWoodenBench(2.0);
-        bench.position.set(bx, 0, 1.8);
+        const spot=clearance.find('gallery bench',bx,1.8,2.05,0.50,0.10);
+        if(!spot)return;
+        bench.position.set(spot.x,0,spot.z);
         classroomGroup.add(bench);
+        registerCollider(spot.x,spot.z,2.00,0.46,0.12);
       });
 
       const spots = [
@@ -3801,9 +3847,9 @@
         frame.rotation.y = sp.rotY;
         const canvasPlane = new THREE.Mesh(
           new THREE.PlaneGeometry(2.02, 1.34),
-          new THREE.MeshBasicMaterial({ map: tex })
+          new THREE.MeshBasicMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
         );
-        canvasPlane.position.z = 0.06;
+        canvasPlane.position.z = 0.075;
         canvasPlane.userData = { interactiveType: 'view_artwork', artIndex: sp.idx };
         frame.add(canvasPlane);
         classroomGroup.add(frame);
@@ -3813,12 +3859,14 @@
       for(let b=0;b<ANTHOLOGY_BOOKS.length;b++){
         const px=-4.2+b*2.1;
         const ped = new THREE.Mesh(new THREE.BoxGeometry(0.95,1.0,0.8),pedMat);
-        ped.position.set(px,0.5,-1.6);
+        const pedSpot=clearance.find('anthology pedestal '+b,px,-1.6,0.95,0.80,0.13);
+        if(!pedSpot)continue;
+        ped.position.set(pedSpot.x,0.5,pedSpot.z);
         ped.castShadow=true;
         classroomGroup.add(ped);
-        registerCollider(px,-1.6,0.95,0.8,0.14);
+        registerCollider(pedSpot.x,pedSpot.z,0.95,0.8,0.14);
         const nameplate=createGalleryAnthologyModel(b);
-        nameplate.position.set(px,1.075,-1.6);
+        nameplate.position.set(pedSpot.x,1.075,pedSpot.z);
         nameplate.rotation.y = -0.12 + 0.06*b;
         classroomGroup.add(nameplate);
       }
@@ -3829,7 +3877,11 @@
         gender:'female',role:'reader',shirtColor:0xf8fafc,
         hairColor:0x1c1917,hasBouquet:false
       });
-      room103Reader.position.set(0.05,0,-0.05);
+      const readerSpot=clearance.find('reading student',0.3,-3.45,0.68,0.66,0.17);
+      if(readerSpot){
+        room103Reader.position.set(readerSpot.x,0,readerSpot.z);
+        registerCollider(readerSpot.x,readerSpot.z,0.62,0.58,0.15);
+      } else room103Reader.position.set(0.3,0,-3.45);
       room103Reader.rotation.y=Math.PI;
       classroomGroup.add(room103Reader);
       room103ReaderBook=createHandheldReadingBook();
@@ -3844,10 +3896,13 @@
       [
         { x: -4.4, z: -2.8, rotY: -Math.PI / 2, gender: 'female', shirt: 0xffffff },
         { x: 4.4, z: 0.2, rotY: Math.PI / 2, gender: 'male', shirt: 0xffffff },
-        { x: -1.8, z: -2.6, rotY: 0, gender: 'female', shirt: 0xfce7f3 }
+        { x: -2.45, z: -3.15, rotY: 0.15, gender: 'female', shirt: 0xfce7f3 }
       ].forEach((v, idx) => {
         const visitor = createRealisticHuman({ gender: v.gender, role: 'student', shirtColor: v.shirt });
-        visitor.position.set(v.x, 0, v.z);
+        const spot=clearance.find('gallery visitor '+idx,v.x,v.z,0.64,0.68,0.16);
+        if(!spot)return;
+        visitor.position.set(spot.x,0,spot.z);
+        registerCollider(spot.x,spot.z,0.59,0.59,0.15);
         visitor.rotation.y = v.rotY;
         classroomGroup.add(visitor);
         activeIdleCharacters.push({ mesh: visitor, phase: idx * 1.2 });
