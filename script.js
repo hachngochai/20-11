@@ -225,6 +225,7 @@
     let campusClouds = [];
     let campusWaterRipples = [];
     let graphicsUltra = true;
+    let atmosphereMotes = null;
     let skyShaderUniforms = null;
     let campusBirds = [];
     let fountainWaterJets = [];
@@ -805,12 +806,12 @@
       if (PBR_MAT_CACHE[cacheKey]) return PBR_MAT_CACHE[cacheKey];
 
       const colorObj = new THREE.Color(baseHex);
-      const r = Math.round(colorObj.r * 255);
-      const g = Math.round(colorObj.g * 255);
-      const b = Math.round(colorObj.b * 255);
+      // Canvas textures require sRGB hex; linear RGB component values darkened the older surfaces.
+      const baseCss = typeof baseHex === 'number'
+        ? `#${baseHex.toString(16).padStart(6, '0')}` : colorObj.getStyle();
 
       const diffTex = makeCanvasTexture(`diff_${cacheKey}`, 512, 512, (ctx, w, h) => {
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillStyle = baseCss;
         ctx.fillRect(0, 0, w, h);
         if (type === 'wood') {
           for (let y = 0; y < h; y += 4) {
@@ -1103,7 +1104,22 @@
           new THREE.MeshStandardMaterial({ color: flowerColors[i % flowerColors.length], roughness: 0.35 })
         );
         bloom.position.set(Math.cos(angle) * r, 0.3 + (i % 2) * 0.025, Math.sin(angle) * r);
-        group.add(bloom);
+        // Small articulated petals make the bouquet legible at both camera distances.
+        const petals = new THREE.Group();
+        petals.position.copy(bloom.position);
+        const petalMat = new THREE.MeshStandardMaterial({color:flowerColors[i % flowerColors.length],roughness:0.38,side:THREE.DoubleSide});
+        for(let j=0;j<5;j++) {
+          const a=j*Math.PI*2/5;
+          const petal=new THREE.Mesh(new THREE.SphereGeometry(0.029,8,6),petalMat);
+          petal.scale.set(0.74,0.33,1.3);
+          petal.position.set(Math.cos(a)*0.027,0.006,Math.sin(a)*0.027);
+          petal.rotation.y=a;
+          petals.add(petal);
+        }
+        const center=new THREE.Mesh(new THREE.SphereGeometry(0.016,8,6),
+          new THREE.MeshStandardMaterial({color:0xffe69a,roughness:0.64}));
+        center.position.y=0.018;petals.add(center);
+        group.add(petals);
 
         if (i % 2 === 0) {
           const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.036, 8, 8), leafMat);
@@ -1313,11 +1329,13 @@
       const frameMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.75, roughness: 0.25 });
       const glassMat = new THREE.MeshPhysicalMaterial({
         color: 0xe0f2fe,
-        emissive: 0xfef9c3,
-        emissiveIntensity: 0.45,
-        roughness: 0.08,
+        roughness: 0.12,
+        metalness: 0.04,
+        clearcoat: 0.9,
+        envMapIntensity: 1.25,
         transparent: true,
-        opacity: 0.85
+        opacity: 0.24,
+        depthWrite: false
       });
       const curtainMat = new THREE.MeshStandardMaterial({ color: curtainHex, roughness: 0.72, side: THREE.DoubleSide });
       const sillMat = getProceduralPBRMaterial('stone', 0xf8fafc, 0.35);
@@ -1973,6 +1991,137 @@
       return bGroup;
     }
 
+
+    // =====================================================================
+    // V3 VISUAL PASS — cinematic but asset-free and mobile-friendly.
+    // No extra CDN dependencies, camera changes, or interactive colliders.
+    // =====================================================================
+    function makeSoftFxTexture(key, warm = false) {
+      return makeCanvasTexture(key, 128, 128, (ctx, w, h) => {
+        ctx.clearRect(0, 0, w, h);
+        const grd = ctx.createRadialGradient(w/2,h/2,0,w/2,h/2,w/2);
+        grd.addColorStop(0, warm ? 'rgba(255,246,211,0.76)' : 'rgba(255,255,255,0.9)');
+        grd.addColorStop(0.30, warm ? 'rgba(255,229,166,0.27)' : 'rgba(255,255,255,0.44)');
+        grd.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle=grd; ctx.fillRect(0,0,w,h);
+      });
+    }
+
+    function addRoomArchitecturalPolish(group, width, depth, height) {
+      const wood = getProceduralPBRMaterial('wood', 0x8d6545, 0.63, 0.02, 4);
+      const chalk = new THREE.MeshStandardMaterial({color:0xf2f1ec,roughness:0.88});
+      const softMetal = new THREE.MeshStandardMaterial({color:0xd3d7dd,metalness:0.34,roughness:0.44});
+      const strip = (w,h,d,x,y,z,mat) => {
+        const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+        m.position.set(x,y,z); m.receiveShadow=true; group.add(m); return m;
+      };
+      // Recessed skirtings/coving sit flush against walls; no camera collision.
+      strip(width-0.32,0.12,0.045,0,0.08,-depth/2+0.155,wood);
+      strip(width-0.32,0.095,0.07,0,height-0.12,-depth/2+0.16,chalk);
+      for (const sign of [-1,1]) {
+        strip(0.045,0.12,depth-0.3,sign*(width/2-0.155),0.08,0,wood);
+        strip(0.055,0.095,depth-0.3,sign*(width/2-0.16),height-0.12,0,chalk);
+        // Metal bead at ceiling/wall joint simulates the light-cove profile.
+        strip(0.022,0.028,depth-0.34,sign*(width/2-0.19),height-0.16,0,softMetal);
+      }
+      const frontHalf=(width-2.65)/2;
+      for(const sign of [-1,1]) {
+        strip(frontHalf,0.115,0.052,sign*(width/2-frontHalf/2),0.08,depth/2-0.145,wood);
+      }
+      // Subtle sunlit pools under side windows, not opaque fake light beams.
+      const sunTex = makeSoftFxTexture('warm_sun_pool_v3',true);
+      const poolMat = new THREE.MeshBasicMaterial({map:sunTex,transparent:true,opacity:0.17,
+        depthWrite:false,blending:THREE.AdditiveBlending,polygonOffset:true,polygonOffsetFactor:-1});
+      for (let i=-1;i<=1;i++) {
+        const pool=new THREE.Mesh(new THREE.PlaneGeometry(2.8,1.7),poolMat);
+        pool.rotation.x=-Math.PI/2;
+        pool.rotation.z=-0.16;
+        pool.position.set(-width/2+2.9,0.025,i*depth*0.28);
+        pool.userData.cinematicOnly=true;
+        pool.visible=graphicsUltra;
+        group.add(pool);
+      }
+      // Floating dust has no collision and renders as a single draw call.
+      const positions = new Float32Array(102*3);
+      let seed=94817;
+      const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+      for(let i=0;i<102;i++) {
+        positions[i*3]=(rnd()-0.5)*(width-0.9);
+        positions[i*3+1]=0.65+rnd()*(height-0.95);
+        positions[i*3+2]=(rnd()-0.5)*(depth-0.8);
+      }
+      const geo=new THREE.BufferGeometry();
+      geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
+      const mat=new THREE.PointsMaterial({size:0.043,map:makeSoftFxTexture('dust_spark_v3'),
+        color:0xffe9c6,transparent:true,opacity:0.38,depthWrite:false,blending:THREE.AdditiveBlending,
+        sizeAttenuation:true});
+      const dust=new THREE.Points(geo,mat);
+      dust.userData.cinematicOnly=true; dust.visible=graphicsUltra;
+      group.add(dust);
+      atmosphereMotes=dust;
+    }
+
+    function addCampusCinematicPolish(group) {
+      const paving=getProceduralPBRMaterial('stone',0xd7d0c0,0.7,0.06,1.5);
+      const geometry=new THREE.BoxGeometry(0.32,0.023,0.62);
+      // Plaza edge details avoid the central path and fountain basin.
+      const pavingInstance=new THREE.InstancedMesh(geometry,paving,84);
+      const obj=new THREE.Object3D();
+      for(let i=0;i<42;i++) {
+        for(let side=0;side<2;side++) {
+          obj.position.set(side?5.28:-5.28,0.164,-14.7+i*0.9);
+          obj.rotation.set(0,0,0); obj.scale.set(1,1,(i%3===0)?0.93:1);
+          obj.updateMatrix(); pavingInstance.setMatrixAt(i*2+side,obj.matrix);
+        }
+      }
+      pavingInstance.instanceMatrix.needsUpdate=true;
+      group.add(pavingInstance);
+
+      // Natural thin grass rather than repeated oversized cones and spheres.
+      const bladeGeo=new THREE.ConeGeometry(0.035,0.31,3);
+      bladeGeo.translate(0,0.15,0);
+      const bladeMat=new THREE.MeshStandardMaterial({color:0x3d8e47,roughness:0.95,side:THREE.DoubleSide});
+      const grass=new THREE.InstancedMesh(bladeGeo,bladeMat,750);
+      let seed=19721120;
+      const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+      let n=0;
+      for(let i=0;i<3800 && n<750;i++) {
+        const x=(rnd()-0.5)*100,z=(rnd()-0.5)*105;
+        if(Math.abs(x)<25 && z>-23 && z<29) continue;
+        obj.position.set(x,0.005,z);obj.rotation.set(0,rnd()*Math.PI*2,0);
+        const size=.55+rnd()*.75; obj.scale.set(size,size,size);
+        obj.updateMatrix();grass.setMatrixAt(n++,obj.matrix);
+      }
+      grass.count=n;grass.instanceMatrix.needsUpdate=true;
+      grass.userData.cinematicOnly=true;grass.visible=graphicsUltra;
+      group.add(grass);
+
+      // Subtle radial halos add highlight sparkle without an expensive bloom pass.
+      const glowMap=makeSoftFxTexture('campus_lamp_glow_v3',true);
+      const glowMat=new THREE.SpriteMaterial({map:glowMap,color:0xffd49a,
+        transparent:true,opacity:0.18,depthWrite:false,blending:THREE.AdditiveBlending});
+      for(const z of [19,7,-5]) for(const x of [-4.2,4.2]) {
+        const glow=new THREE.Sprite(glowMat);
+        glow.position.set(x,3.83,z);glow.scale.set(1.8,1.8,1);
+        glow.userData.cinematicOnly=true;glow.visible=graphicsUltra;
+        group.add(glow);
+      }
+    }
+
+    function applyGraphicsQuality() {
+      if(!renderer) return;
+      const dpr=window.devicePixelRatio||1;
+      renderer.setPixelRatio(Math.min(dpr,graphicsUltra?1.8:1.05));
+      renderer.shadowMap.enabled=true;
+      renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+      if(sunLight){sunLight.shadow.radius=graphicsUltra?2.4:1.2;}
+      if(scene){scene.traverse(obj=>{
+        if(obj.userData && obj.userData.cinematicOnly) obj.visible=graphicsUltra;
+      });}
+      const btn=document.getElementById('btn-toggle-gfx');
+      if(btn) btn.title=graphicsUltra?'Cinematic: độ nét cao, ánh sáng và tiểu tiết':'Cao: tối ưu cho máy yếu';
+    }
+
     function buildCampusScene() {
       while (campusGroup.children.length > 0) campusGroup.remove(campusGroup.children[0]);
       campusFlags = [];
@@ -2358,15 +2507,15 @@
         campusBirds.push(bird);
       }
 
-      const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+      const cloudMap = makeSoftFxTexture('cloud_billow_v3');
+      const cloudMat = new THREE.SpriteMaterial({map:cloudMap,color:0xffffff,
+        transparent:true,opacity:0.62,depthWrite:false});
       [[-32, 36, -45], [18, 42, -55], [44, 34, -38], [-12, 39, -62]].forEach(([cx, cy, cz]) => {
         const cloud = new THREE.Group();
         cloud.position.set(cx, cy, cz);
-        [0, 2.4, -2.2].forEach((ox, idx) => {
-          const puff = new THREE.Mesh(new THREE.SphereGeometry(idx === 0 ? 3.2 : 2.3, 12, 12), cloudMat);
-          puff.scale.set(1.4, 0.75, 1.0);
-          puff.position.set(ox, idx === 0 ? 0.3 : 0, 0);
-          cloud.add(puff);
+        [[0,0,11,4.8],[-3,0.1,8.1,3.8],[3,0.2,8.4,3.9]].forEach(([ox,oy,w,h])=>{
+          const puff=new THREE.Sprite(cloudMat);
+          puff.position.set(ox,oy,0);puff.scale.set(w,h,1);cloud.add(puff);
         });
         campusGroup.add(cloud);
         campusClouds.push(cloud);
@@ -2384,6 +2533,7 @@
       campusHero.rotation.y = Math.PI;
       campusGroup.add(campusHero);
 
+      addCampusCinematicPolish(campusGroup);
       campusGroup.traverse((o) => {
         if (o.isMesh && o.userData && o.userData.interactiveType) interactiveList.push(o);
       });
@@ -2858,6 +3008,7 @@
       const exitDoor = createModernDoubleDoor(0, depth / 2 - 0.14, exitType, 'LỐI RA HÀNH LANG');
       targetGroup.add(exitDoor.group);
       targetGroup.userData.exitDoorPivots = exitDoor.pivots;
+      addRoomArchitecturalPolish(targetGroup,width,depth,height);
     }
 
     // =========================================================================
@@ -4837,6 +4988,10 @@
       if (skyShaderUniforms) {
         skyShaderUniforms.uTime.value = elapsed;
       }
+      if (atmosphereMotes && atmosphereMotes.parent && atmosphereMotes.visible) {
+        atmosphereMotes.rotation.y = Math.sin(elapsed * 0.13) * 0.045;
+        atmosphereMotes.position.y = Math.sin(elapsed * 0.31) * 0.09;
+      }
 
       if (sceneMode === 'intro') {
         const progress = Math.min(1, elapsed / 4.2);
@@ -5218,9 +5373,7 @@
           graphicsUltra = !graphicsUltra;
           const lbl = document.getElementById('gfx-toggle-label');
           if (lbl) lbl.textContent = graphicsUltra ? 'Ultra' : 'Cao';
-          if (renderer) {
-            renderer.setPixelRatio(graphicsUltra ? Math.min(window.devicePixelRatio || 1, 2) : 1);
-          }
+          applyGraphicsQuality();
           configureLightingForMode(sceneMode);
           playChime(graphicsUltra ? 760 : 520, 0.14);
         });
@@ -5581,6 +5734,7 @@
       container.appendChild(renderer.domElement);
       scene.add(camera);
       buildPOVViewmodel();
+      applyGraphicsQuality();
 
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
@@ -5595,7 +5749,8 @@
       sunLight.castShadow = true;
       sunLight.shadow.mapSize.set(2048, 2048);
       sunLight.shadow.bias = -0.0004;
-      sunLight.shadow.normalBias = 0.025;
+      sunLight.shadow.normalBias = 0.022;
+      sunLight.shadow.radius = 2.4;
       sunLight.shadow.camera.near = 2;
       sunLight.shadow.camera.far = 130;
       const d = 36;
@@ -5628,6 +5783,7 @@
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        applyGraphicsQuality();
       });
 
       switchSceneMode('intro');
