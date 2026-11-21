@@ -3511,13 +3511,41 @@
       podium.receiveShadow = true;
       targetGroup.add(podium);
 
-      const teacherDesk = new THREE.Mesh(
-        new THREE.BoxGeometry(1.75, 0.78, 0.78),
-        getProceduralPBRMaterial('wood', 0xb45309, 0.38)
-      );
-      teacherDesk.position.set(1.55, 0.55, -4.55);
-      addPrecisionEdge(teacherDesk,0x4e321c,0.20);
-      teacherDesk.castShadow = true;
+      // Actual open-leg teacher's table (not a 0.78m solid wooden box).
+      const teacherDesk=new THREE.Group();
+      teacherDesk.position.set(1.55,0,-4.55);
+      const topMat=getProceduralPBRMaterial('wood',0xab7345,0.52,0.01,1.8);
+      const sideMat=getProceduralPBRMaterial('wood',0x7d4d2f,0.63,0.01,1.4);
+      const deskSteel=new THREE.MeshStandardMaterial({
+        color:0x4b5563,metalness:0.62,roughness:0.43
+      });
+      const desktop=new THREE.Mesh(new THREE.BoxGeometry(1.75,0.065,0.79),topMat);
+      desktop.position.y=0.915;
+      desktop.castShadow=true;desktop.receiveShadow=true;
+      addPrecisionEdge(desktop,0x4e321c,0.21);
+      teacherDesk.add(desktop);
+      const drawer=new THREE.Mesh(new THREE.BoxGeometry(1.50,0.14,0.54),sideMat);
+      drawer.position.set(0,0.795,-0.065);
+      drawer.castShadow=true;
+      teacherDesk.add(drawer);
+      for(const lx of [-0.77,0.77]){
+        for(const lz of [-0.32,0.32]){
+          const leg=new THREE.Mesh(new THREE.BoxGeometry(0.055,0.82,0.055),deskSteel);
+          leg.position.set(lx,0.41,lz);
+          leg.castShadow=true;
+          teacherDesk.add(leg);
+        }
+        const rail=new THREE.Mesh(new THREE.BoxGeometry(0.032,0.035,0.64),deskSteel);
+        rail.position.set(lx,0.62,0);
+        teacherDesk.add(rail);
+      }
+      const frontPanel=new THREE.Mesh(new THREE.BoxGeometry(1.48,0.34,0.035),sideMat);
+      frontPanel.position.set(0,0.68,-0.30);
+      teacherDesk.add(frontPanel);
+      const drawerHandle=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.018,0.023),
+        new THREE.MeshStandardMaterial({color:0xb7bcc6,metalness:0.78,roughness:0.27}));
+      drawerHandle.position.set(0.23,0.81,0.212);
+      teacherDesk.add(drawerHandle);
       targetGroup.add(teacherDesk);
 
       const vase = createFlowerVase(accentHex);
