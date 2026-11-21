@@ -1421,6 +1421,155 @@
       return group;
     }
 
+    // Smooth skinned humanoids (CC0) loaded only where animated characters
+    // are supported; existing procedural bodies remain as an automatic fallback.
+    // Sources: https://tevy.dev/models/casual-walker and /models/hiker
+    const AVATAR_ASSETS = {
+      male: 'https://tevy.dev/models/casual-walker/v1/',
+      female: 'https://tevy.dev/models/hiker/v1/'
+    };
+    let humanoidLoader = null;
+    const humanoidAssetPromises = new Map();
+    let enhancedHumanoids = [];
+
+    function getHumanoidLoader() {
+      if (humanoidLoader) return humanoidLoader;
+      if (!renderer || !THREE.GLTFLoader || !THREE.KTX2Loader ||
+          !THREE.SkeletonUtils || !THREE.SkeletonUtils.clone ||
+          !window.MeshoptDecoder) return null;
+      try {
+        const ktx = new THREE.KTX2Loader()
+          .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/basis/')
+          .detectSupport(renderer);
+        humanoidLoader = new THREE.GLTFLoader();
+        humanoidLoader.setKTX2Loader(ktx);
+        humanoidLoader.setMeshoptDecoder(window.MeshoptDecoder);
+        return humanoidLoader;
+      } catch (error) {
+        console.warn('GLB avatar decoder unavailable; keeping original human models.', error);
+        return null;
+      }
+    }
+
+    function getEnhancedHumanAsset(gender, highDetail) {
+      const loader = getHumanoidLoader();
+      if (!loader) return null;
+      const url = (AVATAR_ASSETS[gender] || AVATAR_ASSETS.male) + (highDetail ? 'lod0.glb' : 'lod1.glb');
+      if (!humanoidAssetPromises.has(url)) {
+        humanoidAssetPromises.set(url, new Promise((resolve,reject) => {
+          loader.load(url, resolve, undefined, reject);
+        }).catch(error => {
+          console.warn('Character GLB could not be loaded; procedural fallback retained:', url, error);
+          return null;
+        }));
+      }
+      return humanoidAssetPromises.get(url);
+    }
+
+    function upgradeStandingHuman(root, options) {
+      // Sit animations are a separate rig requirement; do not force a walking
+      // avatar onto a chair or it will recreate the distorted-leg bug.
+      if (options.isSeated) return;
+      const asset = getEnhancedHumanAsset(options.gender, options.role === 'teacher' || options.hasBouquet);
+      if (!asset) return;
+      asset.then(gltf => {
+        // Skip models from previous scenes already torn down by a room switch.
+        if (!gltf || !root.parent || !root.userData) return;
+        try {
+          const body = THREE.SkeletonUtils.clone(gltf.scene);
+          const bounds = new THREE.Box3().setFromObject(body);
+          const height = bounds.max.y - bounds.min.y;
+          const scale = height > 0.5 ? 1.70/height : 1;
+          body.scale.setScalar(scale);
+          body.position.y = -bounds.min.y*scale;
+          body.traverse(obj => {
+            if (obj.isMesh) {
+              obj.castShadow = true;
+              obj.receiveShadow = true;
+              if (obj.material) {
+                // Keep the original material's textures, with restrained shine.
+                const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+                materials.forEach(mat => {
+                  if (mat.roughness !== undefined) mat.roughness = Math.max(0.48, mat.roughness);
+                });
+              }
+              // A backpack is inappropriate in a teacher/student ceremony.
+              if (/backpack|rucksack|hiking_pack/i.test(obj.name)) obj.visible=false;
+            }
+          });
+          // Preserve click interactions when switching from procedural to GLB.
+          let interaction = null;
+          root.traverse(obj => {
+            if (!interaction && obj.isMesh && obj.userData.interactiveType) {
+              interaction = obj.userData.interactiveType;
+            }
+          });
+          const bouquet = root.userData.bouquetMesh;
+          const originalChildren = [...root.children];
+          const hand = body.getObjectByName('hand_R') || body.getObjectByName('Hand_R') ||
+            body.getObjectByName('RightHand') || body.getObjectByName('mixamorigRightHand');
+          if (bouquet) {
+            if (hand) {
+              hand.add(bouquet);
+              bouquet.position.set(0.01, -0.13, 0.065);
+              bouquet.rotation.set(-0.4, 0.05, 0.18);
+              bouquet.scale.setScalar(0.78);
+            } else {
+              body.add(bouquet);
+              bouquet.position.set(-0.20,1.05,0.26);
+              bouquet.rotation.set(-0.3,0,0.1);
+              bouquet.scale.setScalar(0.78);
+            }
+          }
+          originalChildren.forEach(child => { child.visible=false; });
+          root.add(body);
+          if (interaction) {
+            body.traverse(obj => {
+              if (!obj.isMesh) return;
+              obj.userData.interactiveType=interaction;
+              if (root.parent && root.parent.visible) interactiveList.push(obj);
+            });
+          }
+
+          const mixer = new THREE.AnimationMixer(body);
+          const getClip = key => gltf.animations.find(clip => clip.name.toLowerCase() === key);
+          const idleClip = getClip('idle');
+          const walkClip = getClip('walk');
+          const idle = idleClip ? mixer.clipAction(idleClip) : null;
+          const walk = walkClip ? mixer.clipAction(walkClip) : null;
+          if (idle) { idle.play(); idle.setEffectiveWeight(1); }
+          if (walk) { walk.play(); walk.timeScale=1.45; walk.setEffectiveWeight(0); }
+          let upperRight=null;
+          body.traverse(obj => {
+            if (obj.isBone && !upperRight &&
+                /(?:upper.?arm.?r|right.?upper.?arm|arm.?upper.?r)/i.test(obj.name)) upperRight=obj;
+          });
+          root.userData.enhancedBody = body;
+          enhancedHumanoids.push({root,mixer,idle,walk,upperRight});
+        } catch (error) {
+          console.warn('Enhanced avatar failed to initialize; original character kept.', error);
+        }
+      });
+    }
+
+    function updateEnhancedHumanoids(dt) {
+      enhancedHumanoids = enhancedHumanoids.filter(item=>!!item.root.parent);
+      enhancedHumanoids.forEach(item=>{
+        let visible=true, ptr=item.root;
+        while(ptr){if(!ptr.visible){visible=false;break;}ptr=ptr.parent;}
+        if(!visible) return;
+        const weight=THREE.MathUtils.clamp(item.root.userData.walkBlend || 0,0,1);
+        if(item.idle) item.idle.setEffectiveWeight(1-weight);
+        if(item.walk) item.walk.setEffectiveWeight(weight);
+        item.mixer.update(dt);
+        // A limited upper-arm gesture tracks the existing bouquet choreography.
+        if (item.upperRight && item.root.userData.rightArm) {
+          const originalAngle=item.root.userData.rightArm.rotation.x;
+          if (Math.abs(originalAngle)>0.22 && weight<0.25) item.upperRight.rotation.x+=originalAngle*0.48;
+        }
+      });
+    }
+
     function createRealisticHuman(opts = {}) {
       const {
         gender = 'male',
@@ -1713,6 +1862,7 @@
       }
 
       root.userData = { leftLeg, rightLeg, leftArm, rightArm, headGroup, bouquetMesh, isSeated };
+      upgradeStandingHuman(root, {gender,role,hasBouquet,isSeated});
       return root;
     }
 
@@ -5340,6 +5490,7 @@
         controls.update();
       }
 
+      updateEnhancedHumanoids(dt);
       updatePOVViewmodel(elapsed);
       renderer.render(scene, camera);
     }
