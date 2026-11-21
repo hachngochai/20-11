@@ -4538,6 +4538,14 @@
     }
 
     function switchSceneMode(mode) {
+      // Dispose room 102's slide texture when leaving the board behind.
+      if (sceneMode === 'room102' && mode !== 'room102' && room102SlideState) {
+        room102SlideState.texture?.dispose();
+        room102SlideState.pages.length = 0;
+        room102SlideState = null;
+        room102SlidePointer = null;
+        room102SlideMesh = null;
+      }
       // This is a virtual scene cut: the avatar never jumps through opaque geometry on screen.
       sceneMode = mode;
       if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); speechPlaying = false; }
@@ -6143,6 +6151,8 @@
 
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
       renderer.domElement.setAttribute('aria-label','Thế giới 3D tương tác trường học 20 tháng 11');
+      // Prevent browser touch-panning from competing with POV and on-board slide swipes.
+      renderer.domElement.style.touchAction = 'none';
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.shadowMap.enabled = true;
