@@ -737,9 +737,9 @@
       skyShaderUniforms = {
         uTime: { value: 0 },
         uSunDir: { value: new THREE.Vector3(0.45, 0.62, 0.42).normalize() },
-        uTopColor: { value: new THREE.Color(0x0369a1) },
-        uMidColor: { value: new THREE.Color(0x38bdf8) },
-        uHorizonColor: { value: new THREE.Color(0xfef3c7) },
+        uTopColor: { value: new THREE.Color(0x174b70) },
+        uMidColor: { value: new THREE.Color(0x79badb) },
+        uHorizonColor: { value: new THREE.Color(0xc9dfe9) },
         uSunColor: { value: new THREE.Color(0xfffbeb) }
       };
 
@@ -770,8 +770,8 @@
             col = mix(col, uTopColor, smoothstep(0.24, 0.85, h));
 
             float sunAmt = max(dot(dir, uSunDir), 0.0);
-            float halo = pow(sunAmt, 12.0) * 0.14 + pow(sunAmt, 80.0) * 0.22;
-            float disc = smoothstep(0.9988, 0.9997, sunAmt) * 0.45;
+            float halo = pow(sunAmt, 12.0) * 0.045 + pow(sunAmt, 80.0) * 0.085;
+            float disc = smoothstep(0.9988, 0.9997, sunAmt) * 0.17;
             col += uSunColor * (halo + disc);
 
             float mist = sin(dir.x * 7.0 + uTime * 0.18) * cos(dir.z * 7.0 - uTime * 0.14) * 0.025 * (1.0 - h);
@@ -830,7 +830,12 @@
       if(PBR_MAT_CACHE[cacheKey])return PBR_MAT_CACHE[cacheKey];
       const wood=type==='wood', stone=type==='tile'||type==='stone';
       const baseCss=typeof baseHex==='number'?'#'+baseHex.toString(16).padStart(6,'0'):new THREE.Color(baseHex).getStyle();
-      const dim=graphicsUltra?768:512, micro=graphicsUltra?384:256;
+      // Mobile / low-memory GPUs receive the same physically correct material
+      // at reduced texel density, avoiding out-of-memory and WebGL resets.
+      const lowMemory=(navigator.deviceMemory&&navigator.deviceMemory<=4)
+        ||Math.min(window.innerWidth,window.innerHeight)<680;
+      const dim=graphicsUltra?(lowMemory?512:768):384;
+      const micro=graphicsUltra?(lowMemory?256:384):192;
       let seed=0x9e3779b9;
       for(let i=0;i<cacheKey.length;i++)seed=Math.imul(seed^cacheKey.charCodeAt(i),0x45d9f3b);
       function rand(){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return(seed>>>0)/4294967296;}
@@ -966,7 +971,7 @@
 
     function createSignBoard(text, bg='#7f1d1d', border='#facc15', textColor='#fef08a', width=4, height=0.8, isVertical=false) {
       const aspect=Math.max(0.16,width/Math.max(0.15,height));
-      const density=graphicsUltra?1.5:1;
+      const density=graphicsUltra?(Math.min(window.innerWidth,window.innerHeight)<680?1:1.35):1;
       const baseW=isVertical?320:Math.min(1536,Math.max(640,Math.round(330*aspect)));
       const baseH=isVertical?1280:320;
       const cw=Math.round(baseW*density),ch=Math.round(baseH*density);
@@ -1012,9 +1017,11 @@
 
     function createArtCanvasDataURL(art) {
       const canvas = document.createElement('canvas');
-      canvas.width = 640;
-      canvas.height = 420;
+      // Render art and gallery photo thumbnails at 1.5x native sharpness.
+      canvas.width = 960;
+      canvas.height = 630;
       const ctx = canvas.getContext('2d');
+      ctx.scale(1.5, 1.5);
 
       const grad = ctx.createLinearGradient(0, 0, 0, 420);
       grad.addColorStop(0, art.bg || '#0369a1');
