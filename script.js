@@ -2768,140 +2768,87 @@
 
     function createCenterTwoFlightStaircase(group, upType, downType) {
       const stairGroup = new THREE.Group();
-      stairGroup.position.set(0, 0, 0.40); // Both flights within corridor, not behind rear wall
+      stairGroup.position.set(0, 0, 0.80);
+      const stone = getProceduralPBRMaterial('tile', 0x64748b, 0.65, 0.025, 2);
+      const riserMat = new THREE.MeshStandardMaterial({ color: 0xd4dbe2, roughness: 0.85 });
+      const nosing = new THREE.MeshStandardMaterial({ color: 0x6b7685, metalness: 0.12, roughness: 0.66 });
+      const steel = new THREE.MeshStandardMaterial({ color: 0x9ca9b6, roughness: 0.34, metalness: 0.75 });
+      const railMat = new THREE.MeshStandardMaterial({ color: 0x526170, roughness: 0.32, metalness: 0.6 });
+      const paint = new THREE.MeshStandardMaterial({ color: 0xf0f0ee, roughness: 0.85 });
+      const n = 11, totalRise = 1.9, run = 2.9, rise = totalRise / n, depth = run / n;
+      const x1=1.04, x2=-1.04, zFront=0, zRear=-run;
 
-      const riserMat = new THREE.MeshStandardMaterial({ color: 0xd9e2ec, roughness: 0.82 });
-      const graniteMat = getProceduralPBRMaterial('tile', 0x334155, 0.28, 0.15, 1);
-      const nosingGoldMat = new THREE.MeshStandardMaterial({ color: 0x8895a7, metalness: 0.32, roughness: 0.56 });
-      const stringerMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.5 });
-      const woodRailMat = getProceduralPBRMaterial('wood', 0x78350f, 0.35, 0.1, 2);
-      const steelMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.88, roughness: 0.18 });
-      const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xb1c6d5, transparent: true, opacity: 0.16, roughness: 0.35, metalness: 0.02, depthWrite: false, side: THREE.DoubleSide });
-      const alcoveSideMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.62 });
-
-      [-2.15, 2.15].forEach((ax) => {
-        const sideW = new THREE.Mesh(new THREE.BoxGeometry(0.24, 4.0, 3.3), alcoveSideMat);
-        sideW.position.set(ax, 2.0, -1.6);
-        stairGroup.add(sideW);
+      function box(w,h,d,x,y,z,mat,interactive=false) {
+        const obj = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+        obj.position.set(x,y,z); obj.castShadow = true; obj.receiveShadow = true;
+        if(interactive && upType) obj.userData.interactiveType=upType;
+        stairGroup.add(obj); return obj;
+      }
+      // Stairwell walls leave the front entry unobstructed.
+      box(0.14,4.25,4.15, 2.15,2.125,-1.90,paint);
+      box(0.14,4.25,4.15,-2.15,2.125,-1.90,paint);
+      box(4.44,4.25,0.16,0,2.125,-4.04,paint);
+      const glass = new THREE.MeshPhysicalMaterial({
+        color:0xbdd5e2, transparent:true, opacity:0.26, roughness:0.45,
+        depthWrite:false, side:THREE.DoubleSide
       });
-      const backStairWall = new THREE.Mesh(new THREE.BoxGeometry(4.5, 4.0, 0.25), alcoveSideMat);
-      backStairWall.position.set(0, 2.0, -3.25);
-      stairGroup.add(backStairWall);
+      box(2.1,1.55,0.05,0,2.68,-3.94,glass);
+      const border=box(2.25,1.72,0.09,0,2.68,-3.97,steel);
+      // Opaque border has a glass insert in front rather than a luminous billboard.
+      border.material=paint;
+      box(2.08,1.53,0.12,0,2.68,-3.89,glass);
+      box(0.06,1.57,0.11,0,2.68,-3.86,steel);
+      box(2.1,0.06,0.11,0,2.68,-3.86,steel);
 
-      const winFrame = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.65, 0.16), steelMat);
-      winFrame.position.set(0, 2.75, -3.12);
-      stairGroup.add(winFrame);
-      const winGlass = new THREE.Mesh(
-        new THREE.BoxGeometry(2.0, 1.45, 0.08),
-        new THREE.MeshBasicMaterial({ color: 0xfef9c3 })
-      );
-      winGlass.position.set(0, 2.75, -3.1);
-      stairGroup.add(winGlass);
-
-      const numSteps1 = 8;
-      const stepH1 = 1.90 / numSteps1;
-      const stepD1 = 2.10 / numSteps1;
-      for (let i = 0; i < numSteps1; i++) {
-        const sy = (i + 1) * stepH1;
-        const sz = -i * stepD1;
-        const riser = new THREE.Mesh(new THREE.BoxGeometry(1.72, stepH1 + 0.14, stepD1 + 0.02), riserMat);
-        riser.position.set(1.02, sy - (stepH1 + 0.14) / 2, sz - stepD1 / 2);
-        if (upType) riser.userData = { interactiveType: upType };
-        stairGroup.add(riser);
-
-        const tread = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.045, stepD1 + 0.04), graniteMat);
-        tread.position.set(1.02, sy, sz - stepD1 / 2 + 0.01);
-        if (upType) tread.userData = { interactiveType: upType };
-        stairGroup.add(tread);
-
-        const nose = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.02, 0.025), nosingGoldMat);
-        nose.position.set(1.02, sy + 0.015, sz + 0.025);
-        stairGroup.add(nose);
+      for(let i=0;i<n;i++){
+        const height=(i+1)*rise;
+        const firstZ=-(i+0.5)*depth;
+        const secondZ=-run+(i+0.5)*depth;
+        // Continuous enclosed risers look like concrete, not disconnected floating boxes.
+        box(1.75,height,depth+0.005,x1,height/2,firstZ,riserMat,true);
+        box(1.81,0.047,depth+0.015,x1,height+0.013,firstZ,stone,true);
+        box(1.81,0.018,0.025,x1,height+0.039,firstZ+depth/2-0.015,nosing);
+        const upperY=totalRise+height;
+        box(1.75,upperY-totalRise,depth+0.005,x2,totalRise+(upperY-totalRise)/2,secondZ,riserMat,true);
+        box(1.81,0.047,depth+0.015,x2,upperY+0.013,secondZ,stone,true);
+        box(1.81,0.018,0.025,x2,upperY+0.039,secondZ-depth/2+0.015,nosing);
       }
 
-      const f1Len = Math.hypot(2.10, 1.90);
-      const f1Angle = Math.atan2(1.90, 2.10);
-      [0.18, 1.88].forEach((sx) => {
-        const stringer = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.28, f1Len + 0.2), stringerMat);
-        stringer.rotation.x = f1Angle;
-        stringer.position.set(sx, 0.85, -1.05);
-        stairGroup.add(stringer);
-      });
+      box(4.02,0.20,1.06,0,1.80,-3.33,paint,true);
+      box(4.02,0.052,1.07,0,1.925,-3.33,stone,true);
+      box(4.02,0.02,0.028,0,1.955,-2.81,nosing);
 
-      const rail1Glass = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.78, f1Len), glassMat);
-      rail1Glass.rotation.x = f1Angle;
-      rail1Glass.position.set(0.18, 1.42, -1.05);
-      stairGroup.add(rail1Glass);
-
-      const rail1Wood = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, f1Len + 0.15), woodRailMat);
-      rail1Wood.rotation.x = f1Angle;
-      rail1Wood.position.set(0.18, 1.84, -1.05);
-      stairGroup.add(rail1Wood);
-
-      const landing = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.26, 1.05), stringerMat);
-      landing.position.set(0, 1.77, -2.62);
-      if (upType) landing.userData = { interactiveType: upType };
-      stairGroup.add(landing);
-
-      const landingGranite = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.04, 1.05), graniteMat);
-      landingGranite.position.set(0, 1.91, -2.62);
-      if (upType) landingGranite.userData = { interactiveType: upType };
-      stairGroup.add(landingGranite);
-
-      const numSteps2 = 8;
-      const stepH2 = 1.90 / numSteps2;
-      const stepD2 = 2.10 / numSteps2;
-      for (let i = 0; i < numSteps2; i++) {
-        const sy = 1.90 + (i + 1) * stepH2;
-        const sz = -2.10 + i * stepD2;
-        const riser = new THREE.Mesh(new THREE.BoxGeometry(1.72, stepH2 + 0.16, stepD2 + 0.02), riserMat);
-        riser.position.set(-1.02, sy - (stepH2 + 0.16) / 2, sz + stepD2 / 2);
-        if (upType) riser.userData = { interactiveType: upType };
-        stairGroup.add(riser);
-
-        const tread = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.045, stepD2 + 0.04), graniteMat);
-        tread.position.set(-1.02, sy, sz + stepD2 / 2 - 0.01);
-        if (upType) tread.userData = { interactiveType: upType };
-        stairGroup.add(tread);
-
-        const nose = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.02, 0.025), nosingGoldMat);
-        nose.position.set(-1.02, sy + 0.015, sz - 0.025);
-        stairGroup.add(nose);
+      function pipe(a,b,r,material=railMat) {
+        const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+        const d = new THREE.Vector3().subVectors(B,A);
+        const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r,r,d.length(),12),material);
+        mesh.position.copy(A).add(B).multiplyScalar(0.5);
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize());
+        mesh.castShadow=true; stairGroup.add(mesh); return mesh;
       }
-
-      [-1.88, -0.18].forEach((sx) => {
-        const stringer = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.28, f1Len + 0.2), stringerMat);
-        stringer.rotation.x = -f1Angle;
-        stringer.position.set(sx, 2.75, -1.05);
-        stairGroup.add(stringer);
+      // Each railing follows its own riser slope, with slim vertical balusters.
+      [0.19,1.90].forEach(x=>{
+        pipe([x,0.94,0],[x,totalRise+0.94,-run],0.038);
+        for(let i=0;i<=7;i++){
+          const t=i/7;
+          pipe([x,t*totalRise,-t*run],[x,t*totalRise+0.94,-t*run],0.018,steel);
+        }
       });
-
-      const rail2Glass = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.78, f1Len), glassMat);
-      rail2Glass.rotation.x = -f1Angle;
-      rail2Glass.position.set(-0.18, 3.32, -1.05);
-      stairGroup.add(rail2Glass);
-
-      const rail2Wood = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, f1Len + 0.15), woodRailMat);
-      rail2Wood.rotation.x = -f1Angle;
-      rail2Wood.position.set(-0.18, 3.74, -1.05);
-      stairGroup.add(rail2Wood);
-
-      [[0.18, 1.35, 0], [0.18, 2.35, -2.08], [-0.18, 2.35, -2.08], [-0.18, 4.2, 0]].forEach(([px, py, pz]) => {
-        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.92, 10), steelMat);
-        post.position.set(px, py, pz);
-        stairGroup.add(post);
+      [-0.19,-1.90].forEach(x=>{
+        pipe([x,totalRise+0.94,-run],[x,totalRise*2+0.94,0],0.038);
+        for(let i=0;i<=7;i++){
+          const t=i/7;
+          pipe([x,totalRise+t*totalRise,-run+t*run],[x,totalRise+t*totalRise+0.94,-run+t*run],0.018,steel);
+        }
       });
+      pipe([1.9,totalRise+0.95,-3.72],[-1.9,totalRise+0.95,-3.72],0.045);
+      for(let x=-1.9;x<=1.9;x+=0.48)
+        pipe([x,totalRise,-3.72],[x,totalRise+0.94,-3.72],0.017,steel);
 
-      if (downType) {
-        const downMat = new THREE.Mesh(
-          new THREE.BoxGeometry(2.6, 0.04, 0.95),
-          new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.45 })
-        );
-        downMat.position.set(0, 0.02, 0.65);
-        downMat.userData = { interactiveType: downType };
-        stairGroup.add(downMat);
+      if(downType){
+        const downMarker=box(1.35,0.04,0.40,-1.04,0.025,0.62,stone);
+        downMarker.userData.interactiveType=downType;
       }
-
       group.add(stairGroup);
     }
 
@@ -4814,22 +4761,22 @@
       if (activeTransition()) return;
       lastExitedDoorX = 0;
       const start = roomHero ? [roomHero.position.x, roomHero.position.y, roomHero.position.z] : [0,0,1.2];
-      const zNear=0.40, zFar=-1.70, zLanding=-2.08, rise=1.90;
+      const zNear=0.80, zFar=-2.10, zLanding=-2.53, rise=1.90;
       // Two real flights, a crossing at the intermediate landing and a 180° turn.
       const segments=goingUp ? [
-        {name:'approach',end:[1.02,0,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]-1.02,start[2]-zNear)/2.5)},
-        {name:'flight-1',end:[1.02,rise,zFar],seconds:3.7},
+        {name:'approach',end:[1.04,0,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]-1.04,start[2]-zNear)/2.5)},
+        {name:'flight-1',end:[1.04,rise,zFar],seconds:3.7},
         {name:'landing-in',end:[0.60,rise,zLanding],seconds:0.75},
-        {name:'landing-turn',end:[-1.02,rise,zLanding],seconds:1.45},
-        {name:'flight-2',end:[-1.02,rise*2,zNear],seconds:3.7},
-        {name:'exit',end:[-1.02,rise*2,zNear+0.40],seconds:0.70}
+        {name:'landing-turn',end:[-1.04,rise,zLanding],seconds:1.45},
+        {name:'flight-2',end:[-1.04,rise*2,zNear],seconds:3.7},
+        {name:'exit',end:[-1.04,rise*2,zNear+0.40],seconds:0.70}
       ] : [
-        {name:'approach',end:[-1.02,rise*2,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]+1.02,start[2]-zNear)/2.5)},
-        {name:'flight-2',end:[-1.02,rise,zFar],seconds:3.7},
+        {name:'approach',end:[-1.04,rise*2,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]+1.04,start[2]-zNear)/2.5)},
+        {name:'flight-2',end:[-1.04,rise,zFar],seconds:3.7},
         {name:'landing-in',end:[-0.60,rise,zLanding],seconds:0.75},
-        {name:'landing-turn',end:[1.02,rise,zLanding],seconds:1.45},
-        {name:'flight-1',end:[1.02,0,zNear],seconds:3.7},
-        {name:'exit',end:[1.02,0,zNear+0.40],seconds:0.70}
+        {name:'landing-turn',end:[1.04,rise,zLanding],seconds:1.45},
+        {name:'flight-1',end:[1.04,0,zNear],seconds:3.7},
+        {name:'exit',end:[1.04,0,zNear+0.40],seconds:0.70}
       ];
       let previous=[start[0],goingUp?0:rise*2,start[2]];
       const steps=segments.map(item=>{const step={...item,start:previous};previous=item.end;return step;});
