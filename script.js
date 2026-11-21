@@ -307,6 +307,29 @@
       if (el) el.classList.toggle('is-active', !!on);
     }
 
+    // Fine geometric edge highlights are intentionally reserved for hard
+    // architectural parts: desks, shelves, book covers, staircase nosings.
+    // Applying them to skin/curved shapes would create unnatural outlines.
+    const PRECISION_EDGE_MATERIALS = new Map();
+    function addPrecisionEdge(mesh,color=0x344054,opacity=0.25) {
+      if(!mesh?.geometry || !THREE.EdgesGeometry)return;
+      const key=color+'_'+opacity;
+      let material=PRECISION_EDGE_MATERIALS.get(key);
+      if(!material){
+        material=new THREE.LineBasicMaterial({
+          color,transparent:true,opacity,depthTest:true,depthWrite:false,
+          toneMapped:false
+        });
+        PRECISION_EDGE_MATERIALS.set(key,material);
+      }
+      const edges=new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry,28),material);
+      edges.scale.setScalar(1.0025);
+      edges.userData.cinematicOnly=true;
+      edges.visible=graphicsUltra;
+      edges.renderOrder=2;
+      mesh.add(edges);
+    }
+
     function createSceneClearancePlanner(roomWidth=14, roomDepth=12) {
       const reserved=[];
       const intersects=(a,b)=>a.minX<b.maxX && a.maxX>b.minX && a.minZ<b.maxZ && a.maxZ>b.minZ;
@@ -762,9 +785,9 @@
       sh.camera.top=extent;sh.camera.bottom=-extent;
       sh.camera.near=1;sh.camera.far=outdoor?125:82;
       sh.camera.updateProjectionMatrix();
-      sh.normalBias=outdoor?0.015:0.010;
+      sh.normalBias=outdoor?0.014:0.009;
       sh.bias=-0.00016;
-      sh.radius=graphicsUltra?2.1:1.4;
+      sh.radius=graphicsUltra?1.3:1.15;
       renderer.shadowMap.needsUpdate=true;
     }
 
@@ -852,8 +875,11 @@
       drawFn(ctx, w, h);
       const tex = new THREE.CanvasTexture(canvas);
       tex.encoding = THREE.sRGBEncoding;
+      tex.generateMipmaps = true;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
       if (renderer && renderer.capabilities) {
-        tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        tex.anisotropy = Math.min(graphicsUltra ? 16 : 6, renderer.capabilities.getMaxAnisotropy());
       }
       TEXTURE_CACHE[key] = tex;
       return tex;
@@ -1315,6 +1341,7 @@
 
       const deskTop = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.055, 0.62), topWood);
       deskTop.position.set(0, 0.74, 0);
+      addPrecisionEdge(deskTop,0x4e321c,0.29);
       deskTop.castShadow = true;
       deskTop.receiveShadow = true;
       group.add(deskTop);
@@ -1357,6 +1384,7 @@
           chair.position.set(cx, 0, 0.46);
           const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.4), topWood);
           seat.position.y = 0.44;
+          addPrecisionEdge(seat,0x4e321c,0.17);
           seat.castShadow = true;
           chair.add(seat);
 
@@ -2370,11 +2398,11 @@
           if(sh.map){sh.map.dispose();sh.map=null;}
           renderer.shadowMap.needsUpdate=true;
         }
-        sh.radius=graphicsUltra?2.1:1.4;
+        sh.radius=graphicsUltra?1.3:1.15;
       }
       // Prefer sharper oblique floor textures, with a bounded GPU budget.
       const maxAniso=renderer.capabilities?.getMaxAnisotropy?.()||4;
-      const factor=Math.min(maxAniso,graphicsUltra?12:4);
+      const factor=Math.min(maxAniso,graphicsUltra?16:6);
       Object.values(TEXTURE_CACHE).forEach(tex=>{
         if(tex?.isTexture && tex.anisotropy!==factor){
           tex.anisotropy=factor;tex.needsUpdate=true;
@@ -2885,6 +2913,7 @@
       function box(w,h,d,x,y,z,mat,interactive=false) {
         const obj = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
         obj.position.set(x,y,z); obj.castShadow = true; obj.receiveShadow = true;
+        if(mat===stone && h<=0.08) addPrecisionEdge(obj,0x334155,0.22);
         if(interactive && actionType) obj.userData.interactiveType=actionType;
         stairGroup.add(obj); return obj;
       }
@@ -3353,6 +3382,7 @@
         getProceduralPBRMaterial('wood', 0x92400e, 0.45)
       );
       podium.position.set(0, 0.08, -4.65);
+      addPrecisionEdge(podium,0x5a3821,0.24);
       podium.receiveShadow = true;
       targetGroup.add(podium);
 
@@ -3361,6 +3391,7 @@
         getProceduralPBRMaterial('wood', 0xb45309, 0.38)
       );
       teacherDesk.position.set(1.55, 0.55, -4.55);
+      addPrecisionEdge(teacherDesk,0x4e321c,0.20);
       teacherDesk.castShadow = true;
       targetGroup.add(teacherDesk);
 
@@ -3693,6 +3724,7 @@
         mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;
         mesh.userData.interactiveType='open_anthology';
         mesh.userData.bookIndex=index;
+        if(y>=0.1 && h<0.06)addPrecisionEdge(mesh,0xf6d794,0.26);
         group.add(mesh);return mesh;
       }
       addBox(0.68,0.045,0.51,0,0,0,coverMat);
