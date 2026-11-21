@@ -2618,15 +2618,15 @@
 
     function createCenterTwoFlightStaircase(group, upType, downType) {
       const stairGroup = new THREE.Group();
-      stairGroup.position.set(0, 0, -3.55);
+      stairGroup.position.set(0, 0, 0.40); // Both flights within corridor, not behind rear wall
 
-      const riserMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45 });
+      const riserMat = new THREE.MeshStandardMaterial({ color: 0xd9e2ec, roughness: 0.82 });
       const graniteMat = getProceduralPBRMaterial('tile', 0x334155, 0.28, 0.15, 1);
-      const nosingGoldMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.75, roughness: 0.25 });
+      const nosingGoldMat = new THREE.MeshStandardMaterial({ color: 0x8895a7, metalness: 0.32, roughness: 0.56 });
       const stringerMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.5 });
       const woodRailMat = getProceduralPBRMaterial('wood', 0x78350f, 0.35, 0.1, 2);
       const steelMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.88, roughness: 0.18 });
-      const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.36, roughness: 0.08 });
+      const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xb1c6d5, transparent: true, opacity: 0.16, roughness: 0.35, metalness: 0.02, depthWrite: false, side: THREE.DoubleSide });
       const alcoveSideMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.62 });
 
       [-2.15, 2.15].forEach((ax) => {
@@ -2765,12 +2765,18 @@
       floor.receiveShadow = true;
       targetGroup.add(floor);
 
-      const ceil = new THREE.Mesh(
-        new THREE.BoxGeometry(26, 0.2, 7.2),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75 })
-      );
-      ceil.position.set(0, 3.9, 0.2);
-      targetGroup.add(ceil);
+      // An open central stairwell avoids clipping through a solid ceiling.
+      const ceilingMaterial=new THREE.MeshStandardMaterial({color:0xf5f5f4,roughness:0.82});
+      [-7.6,7.6].forEach(cx=>{
+        const section=new THREE.Mesh(new THREE.BoxGeometry(10.8,0.2,7.2),ceilingMaterial);
+        section.position.set(cx,3.9,0.2);
+        targetGroup.add(section);
+      });
+      [-2.2,2.2].forEach(cx=>{
+        const beam=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.24,7.2),ceilingMaterial);
+        beam.position.set(cx,3.9,0.2);
+        targetGroup.add(beam);
+      });
 
       [-8.5, -3.8, 3.8, 8.5].forEach((lx) => {
         const led = new THREE.Mesh(
@@ -4657,15 +4663,31 @@
     function startStairClimb(targetHallwayMode, goingUp) {
       if (activeTransition()) return;
       lastExitedDoorX = 0;
-      stairClimbAnim = {
-        progress: 0,
-        fromX: roomHero ? roomHero.position.x : 0,
-        fromZ: roomHero ? roomHero.position.z : 0,
-        fromY: roomHero ? roomHero.position.y : 0,
-        targetHallwayMode,
-        goingUp
-      };
-      playChime(goingUp ? 660 : 440, 0.18);
+      const start = roomHero ? [roomHero.position.x, roomHero.position.y, roomHero.position.z] : [0,0,1.2];
+      const zNear=0.40, zFar=-1.70, zLanding=-2.08, rise=1.90;
+      // Two real flights, a crossing at the intermediate landing and a 180° turn.
+      const segments=goingUp ? [
+        {name:'approach',end:[1.02,0,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]-1.02,start[2]-zNear)/2.5)},
+        {name:'flight-1',end:[1.02,rise,zFar],seconds:3.7},
+        {name:'landing-in',end:[0.60,rise,zLanding],seconds:0.75},
+        {name:'landing-turn',end:[-1.02,rise,zLanding],seconds:1.45},
+        {name:'flight-2',end:[-1.02,rise*2,zNear],seconds:3.7},
+        {name:'exit',end:[-1.02,rise*2,zNear+0.40],seconds:0.70}
+      ] : [
+        {name:'approach',end:[-1.02,rise*2,zNear+0.14],seconds:Math.max(0.85,Math.hypot(start[0]+1.02,start[2]-zNear)/2.5)},
+        {name:'flight-2',end:[-1.02,rise,zFar],seconds:3.7},
+        {name:'landing-in',end:[-0.60,rise,zLanding],seconds:0.75},
+        {name:'landing-turn',end:[1.02,rise,zLanding],seconds:1.45},
+        {name:'flight-1',end:[1.02,0,zNear],seconds:3.7},
+        {name:'exit',end:[1.02,0,zNear+0.40],seconds:0.70}
+      ];
+      let previous=[start[0],goingUp?0:rise*2,start[2]];
+      const steps=segments.map(item=>{const step={...item,start:previous};previous=item.end;return step;});
+      stairClimbAnim={stage:0,stageTime:0,progress:0,steps,targetHallwayMode,goingUp};
+      resetHeroMotion();
+      // Camera is controlled by the animation until the second flight is completed.
+      if(controls && !isFirstPersonPOV) controls.enabled=false;
+      playChime(goingUp?610:455,0.11);
     }
 
     function startGiftCeremony(whichRoom) {
@@ -5177,18 +5199,34 @@
       }
       if (stairClimbAnim) {
         const a=stairClimbAnim;
-        a.progress=Math.min(1,a.progress+dt/2.15);
-        const p=a.progress;
-        if(roomHero){
-          const approach=smooth01(Math.min(1,p/0.5));
-          roomHero.position.x=THREE.MathUtils.lerp(a.fromX,0,approach);
-          roomHero.position.z=THREE.MathUtils.lerp(a.fromZ,-2.25,approach);
-          roomHero.position.y=a.fromY+(a.goingUp?1:-1)*2.35*smooth01((p-0.35)/0.65);
-          roomHero.rotation.y=Math.PI;
-          animateHumanWalk(roomHero,elapsed,9,dt);
+        const seg=a.steps[a.stage];
+        if(seg && roomHero) {
+          a.stageTime=Math.min(seg.seconds,a.stageTime+dt);
+          const t=smooth01(a.stageTime/seg.seconds);
+          const [x0,y0,z0]=seg.start;
+          const [x1,y1,z1]=seg.end;
+          roomHero.position.set(THREE.MathUtils.lerp(x0,x1,t),THREE.MathUtils.lerp(y0,y1,t),THREE.MathUtils.lerp(z0,z1,t));
+          const dx=x1-x0,dz=z1-z0;
+          if(Math.hypot(dx,dz)>0.03){
+            const desired=Math.atan2(dx,dz);
+            const dyaw=((desired-roomHero.rotation.y+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
+            roomHero.rotation.y+=dyaw*(1-Math.exp(-dt*8));
+          }
+          animateHumanWalk(roomHero,elapsed,seg.name.startsWith('landing')?5:8.5,dt);
+          const duration=a.steps.reduce((sum,v)=>sum+v.seconds,0);
+          const prior=a.steps.slice(0,a.stage).reduce((sum,v)=>sum+v.seconds,0);
+          a.progress=(prior+a.stageTime)/duration;
+          if(a.progress>0.965)setSceneCurtain(true);
+          if(a.stageTime>=seg.seconds){
+            a.stage++;
+            a.stageTime=0;
+            if(a.stage>=a.steps.length){
+              const next=a.targetHallwayMode;
+              stairClimbAnim=null;
+              switchSceneMode(next);
+            }
+          }
         }
-        if(p>0.76) setSceneCurtain(true);
-        if(p>=1) switchSceneMode(a.targetHallwayMode);
       }
       if (room101GiftAnim && roomHero && room101Teacher) updateGiftCeremony(room101GiftAnim,dt,elapsed);
       if (room301GiftAnim && roomHero && room301Teacher) updateGiftCeremony(room301GiftAnim,dt,elapsed);
@@ -5273,6 +5311,10 @@
         if (!isFirstPersonPOV && roomHero && sceneMode !== 'campus' && sceneMode !== 'intro') {
           roomHero.visible = true;
           const activeGift = room101GiftAnim || room301GiftAnim;
+          if (stairClimbAnim) {
+            camera.position.lerp(new THREE.Vector3(4.65,3.38,3.25),1-Math.exp(-dt*3.4));
+            controls.target.lerp(new THREE.Vector3(0,1.95,-0.72),1-Math.exp(-dt*3.4));
+          }
           if (activeGift) {
             // A composed third-person shot: both faces and the bouquet remain visible.
             const b=activeGift.whichRoom==='room101';
