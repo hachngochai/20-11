@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Thế Giới 3D Tri Ân Ngày Nhà Giáo Việt Nam 20/11</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="scene-curtain" aria-hidden="true"></div>
+  <div id="camera-mode-info" aria-live="polite">Cam toàn cảnh • Tự do xoay</div>
+  <div id="camera-flash"></div>
+
+  <!-- Intro Overlay -->
+  <div id="intro-overlay" class="fixed inset-0 z-30 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+    <div class="flex justify-between items-center">
+      <div class="glass-panel rounded-full px-4 py-1.5 text-amber-300 text-xs font-bold tracking-wider uppercase flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+        <span>Hành Trình Tri Ân 20/11</span>
+      </div>
+      <button id="btn-skip-intro" class="pointer-events-auto glass-panel hover:bg-slate-800/90 text-white text-xs sm:text-sm font-semibold px-4 py-2 rounded-full transition active:scale-95">
+        Bỏ qua Intro →
+      </button>
+    </div>
+    <div class="w-full max-w-md mx-auto mb-3">
+      <div class="w-full h-2 bg-slate-900/70 rounded-full overflow-hidden backdrop-blur-md border border-white/20 p-0.5">
+        <div id="intro-progress-bar" class="h-full w-0 bg-gradient-to-r from-sky-400 via-amber-400 to-rose-400 rounded-full transition-all duration-150"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main HUD -->
+  <div id="main-ui" class="fixed inset-0 z-20 pointer-events-none flex flex-col justify-between p-3 sm:p-4 opacity-0 transition-opacity duration-500">
+    <!-- Top Bar: Back Button + Compact Scene Title + Graphics & POV Toggle -->
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <button id="btn-back" class="hidden pointer-events-auto glass-panel hover:bg-slate-800/90 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition active:scale-95">
+          <span>← Quay Lại</span>
+        </button>
+        <div class="glass-panel rounded-xl px-3.5 py-2 text-white flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0"></span>
+          <strong id="ui-scene-title" class="font-extrabold text-amber-300 uppercase text-[11px] sm:text-xs tracking-wide">Khuôn Viên 20/11</strong>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <button id="btn-toggle-gfx" class="pointer-events-auto glass-panel hover:bg-slate-800/90 text-emerald-300 border border-emerald-400/40 font-bold px-2.5 py-2 rounded-xl text-xs flex items-center gap-1 transition active:scale-95">
+          <span>✨</span>
+          <span id="gfx-toggle-label">Ultra</span>
+        </button>
+        <div class="cam-mode-switch pointer-events-auto glass-panel rounded-xl" role="group" aria-label="Chọn camera">
+          <button id="btn-camera-overview" type="button" aria-pressed="true" class="camera-active" title="Máy quay toàn cảnh độc lập">🎥 Toàn cảnh</button>
+          <button id="btn-camera-donor" type="button" aria-pressed="false" title="Camera đặt ở mắt học sinh tặng hoa">👁 Người tặng</button>
+        </div>
+        <button id="btn-audio-toggle" type="button" aria-pressed="true" class="pointer-events-auto glass-panel audio-button rounded-xl text-xs font-bold px-3 py-2 text-sky-200">🔊 Âm thanh</button>
+      </div>
+    </div>
+
+    <!-- Floating 3D Labels -->
+    <div id="floating-labels-layer" class="fixed inset-0 pointer-events-none overflow-hidden"></div>
+
+    <!-- Clean Direct Action Bar at Bottom -->
+    <div class="flex flex-col items-center gap-1.5 w-full max-w-5xl mx-auto">
+      <div id="classroom-controls" class="hidden pointer-events-auto flex flex-wrap justify-center gap-1.5"></div>
+
+      <div id="campus-quick-pills" class="pointer-events-auto glass-panel rounded-2xl p-1.5 flex flex-wrap justify-center gap-1.5">
+        <button data-cam="overview" class="cam-pill bg-amber-500 text-slate-950 font-bold px-3 py-1.5 rounded-xl text-xs transition">🏫 Toàn Cảnh</button>
+        <button data-cam="gate" class="cam-pill hover:bg-white/10 text-white font-semibold px-3 py-1.5 rounded-xl text-xs transition">⛩️ Cổng Đỏ</button>
+        <button id="btn-enter-teacher-bldg" class="cam-pill bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-3 py-1.5 rounded-xl text-xs transition">💙 Tri Ân Thầy Cô Giáo (Tòa Xanh)</button>
+        <button id="btn-enter-female-bldg" class="cam-pill bg-pink-500 hover:bg-pink-400 text-slate-950 font-bold px-3 py-1.5 rounded-xl text-xs transition">💖 Sự Kiện 20-11 (Tòa Hồng)</button>
+        <button id="btn-replay-gate" class="cam-pill hover:bg-white/10 text-amber-300 font-semibold px-3 py-1.5 rounded-xl text-xs transition">🛵 Qua Cổng Đỏ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5,000 VND Extra Tribute Card Payment Modal -->
+  <div id="payment-5k-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-md w-full p-5 sm:p-6 text-white border border-amber-400/50 text-center">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3">
+        <span class="text-xs font-extrabold uppercase tracking-wider text-amber-300">⚠️ Chức năng mua lượt chưa được kết nối</span>
+        <button id="btn-close-pay5k" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+      <div class="my-4">
+        <div class="inline-block bg-rose-500/20 border border-rose-400/40 text-rose-200 text-xs font-semibold px-3 py-1 rounded-full mb-2">
+          Đã dùng hết lượt miễn phí của bản demo
+        </div>
+        <h3 class="text-lg font-extrabold text-white">Đang chờ tích hợp cổng thanh toán</h3>
+        <p class="text-xs text-slate-300 mt-2">Phiên bản này chưa có mã QR thật, máy chủ xác nhận hoặc webhook thanh toán. Không chuyển khoản và không tự cộng lượt bằng nút xác nhận.</p>
+        <div class="bg-slate-900/90 rounded-xl p-3 text-left text-xs border border-white/10 text-amber-200">Chỉ cấp lượt bổ sung sau khi backend xác minh giao dịch thành công.</div>
+      </div>
+      <div class="flex gap-2">
+        <button id="btn-cancel-pay5k" class="flex-1 bg-white/10 hover:bg-white/20 py-2.5 rounded-xl text-xs font-semibold">Để Sau</button>
+        <button id="btn-confirm-pay5k" class="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold shadow-lg">Chưa hỗ trợ thanh toán</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pink Building Room 301: Upload Photo / Hang Greeting Modal -->
+  <div id="pink-301-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-lg w-full p-5 sm:p-6 text-white border border-pink-400/50">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <div>
+          <span class="text-xs font-extrabold uppercase tracking-wider text-pink-300">🖼️ Phòng Tranh 301 • Treo Ảnh & Lời Chúc</span>
+          <div id="pink-301-quota-label" class="text-[11px] text-amber-300 font-semibold mt-0.5">🎁 Miễn phí 1 lần treo đầu tiên (Lần sau 5.000đ)</div>
+        </div>
+        <button id="btn-close-pink301" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+
+      <div class="flex gap-2 mb-3">
+        <button id="tab-p301-photo" type="button" class="flex-1 bg-pink-500 text-slate-950 py-2 rounded-xl text-xs font-extrabold">📷 Tải Ảnh Lên Treo Tường</button>
+        <button id="tab-p301-wish" type="button" class="flex-1 bg-white/10 text-white py-2 rounded-xl text-xs font-bold">💌 Chọn Câu Chúc Treo Tường</button>
+      </div>
+
+      <div id="p301-photo-panel" class="space-y-3">
+        <label class="block w-full border-2 border-dashed border-pink-400/50 hover:border-pink-300 rounded-2xl p-4 text-center cursor-pointer bg-slate-900/60 transition">
+          <input id="p301-file-input" type="file" accept="image/*" class="hidden" />
+          <div class="text-2xl mb-1">🖼️</div>
+          <div class="text-xs font-bold text-pink-200">Nhấn để chọn hình ảnh kỷ niệm từ thiết bị của bạn</div>
+          <div id="p301-file-name" class="text-[11px] text-slate-400 mt-1">Hỗ trợ JPG, PNG, WEBP</div>
+        </label>
+        <input id="p301-photo-caption" type="text" maxlength="60" placeholder="Chú thích bức ảnh (VD: Kỷ niệm lớp 12A1 bên Thầy Cô)..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-400" />
+      </div>
+
+      <div id="p301-wish-panel" class="hidden space-y-2">
+        <select id="p301-wish-select" class="w-full rounded-xl bg-slate-900/95 border border-white/15 px-3 py-2.5 text-xs text-white focus:outline-none focus:border-pink-400">
+          <option value="“Tôn Sư Trọng Đạo — Mãi khắc ghi công ơn dạy dỗ của Thầy Cô!”">“Tôn Sư Trọng Đạo — Mãi khắc ghi công ơn dạy dỗ của Thầy Cô!”</option>
+          <option value="“Cảm ơn Thầy Cô đã thắp sáng ngọn lửa tri thức và ước mơ tuổi học trò.”">“Cảm ơn Thầy Cô đã thắp sáng ngọn lửa tri thức và ước mơ tuổi học trò.”</option>
+          <option value="“Kính chúc Quý Thầy Cô ngày 20/11 thật nhiều sức khỏe, niềm vui và hạnh phúc!”">“Kính chúc Quý Thầy Cô ngày 20/11 thật nhiều sức khỏe, niềm vui và hạnh phúc!”</option>
+          <option value="“Một chữ cũng là thầy, nửa chữ cũng là thầy — Tri ân người lái đò thầm lặng.”">“Một chữ cũng là thầy, nửa chữ cũng là thầy — Tri ân người lái đò thầm lặng.”</option>
+        </select>
+        <input id="p301-wish-author" type="text" maxlength="45" placeholder="Người gửi (VD: Học sinh lớp 11B2)..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-400" />
+      </div>
+
+      <div class="flex gap-2 mt-4">
+        <button id="btn-cancel-pink301" type="button" class="flex-1 bg-white/10 hover:bg-white/20 py-2.5 rounded-xl text-xs font-semibold">Đóng</button>
+        <button id="btn-hang-pink301" type="button" class="flex-1 bg-pink-500 hover:bg-pink-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold shadow-lg">📌 Treo Lên Tường (Lượt Demo)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pink Building Room 302: Tribute Offering (5k/item) & PDF Certificate Modal -->
+  <div id="pink-302-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-lg w-full p-5 sm:p-6 text-white border border-amber-400/50">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span class="text-xs font-extrabold uppercase tracking-wider text-amber-300">🎁 Phòng Tri Ân 302 • Không thu phí trong bản Demo</span>
+        <button id="btn-close-pink302" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 mb-3">
+        <button type="button" data-item="flower" class="p302-item-btn bg-pink-500/25 border-2 border-pink-400 rounded-2xl p-3 text-center transition">
+          <div class="text-2xl mb-1">💐</div>
+          <div class="text-xs font-extrabold text-pink-200">Đóa Hoa</div>
+          <div class="text-[11px] text-amber-300 font-bold">Bản demo</div>
+        </button>
+        <button type="button" data-item="gift" class="p302-item-btn bg-white/5 border border-white/15 rounded-2xl p-3 text-center transition">
+          <div class="text-2xl mb-1">🎁</div>
+          <div class="text-xs font-extrabold text-sky-200">Gói Quà</div>
+          <div class="text-[11px] text-amber-300 font-bold">Bản demo</div>
+        </button>
+        <button type="button" data-item="letter" class="p302-item-btn bg-white/5 border border-white/15 rounded-2xl p-3 text-center transition">
+          <div class="text-2xl mb-1">✉️</div>
+          <div class="text-xs font-extrabold text-emerald-200">Bức Thư</div>
+          <div class="text-[11px] text-amber-300 font-bold">Bản demo</div>
+        </button>
+      </div>
+
+      <div class="space-y-2 mb-4">
+        <input id="p302-sender-input" type="text" maxlength="50" placeholder="Họ và tên của bạn (In lên Giấy Chứng Nhận PDF)..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+        <input id="p302-teacher-input" type="text" maxlength="50" placeholder="Kính tặng Thầy/Cô (VD: Thầy A, Cô B)..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+        <textarea id="p302-note-input" rows="2" maxlength="140" placeholder="Lời nhắn tri ân chân thành..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"></textarea>
+      </div>
+
+      <div class="flex gap-2">
+        <button id="btn-cancel-pink302" type="button" class="flex-1 bg-white/10 hover:bg-white/20 py-2.5 rounded-xl text-xs font-semibold">Đóng</button>
+        <button id="btn-buy-place-p302" type="button" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold shadow-lg">🎁 Đặt Tri Ân Bản Demo (Miễn phí)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pink Building Room 302: Gratitude Certificate & Save PDF Modal -->
+  <div id="certificate-pdf-modal" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-xl w-full p-5 sm:p-6 text-white border border-amber-400/60 text-center">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span class="text-xs font-extrabold uppercase tracking-wider text-amber-300">🏅 Giấy Chứng Nhận Tấm Lòng Tri Ân 20/11</span>
+        <button id="btn-close-cert" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+      <div class="rounded-2xl overflow-hidden border-2 border-amber-400/60 bg-amber-50 shadow-2xl mb-4">
+        <canvas id="certificate-canvas" width="900" height="620" class="w-full h-auto block"></canvas>
+      </div>
+      <div class="flex gap-2">
+        <button id="btn-ok-cert" type="button" class="flex-1 bg-white/10 hover:bg-white/20 py-2.5 rounded-xl text-xs font-semibold">Tiếp Tục Tham Quan</button>
+        <button id="btn-download-cert-pdf" type="button" class="flex-1 bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-xs font-extrabold shadow-lg">📄 Lưu / Tải Về Bản PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="navigation-hint" aria-label="Hướng dẫn điều khiển">W A S D / ← ↑ ↓ →: di chuyển · Kéo chuột: xoay camera · Chọn 👁 để nhập vai</div>
+
+  <!-- Speech / Subtitle Card -->
+  <div id="speech-card" class="hidden fixed bottom-24 left-1/2 -translate-x-1/2 z-30 max-w-lg w-[92%] glass-panel rounded-2xl p-4 text-white border border-amber-400/40">
+    <div class="flex items-center justify-between mb-1">
+      <span id="speech-speaker" class="text-xs font-extrabold uppercase tracking-wider text-amber-300">Lời Tri Ân 20/11</span>
+      <div class="flex items-center gap-2">
+        <button id="btn-replay-voice" type="button" class="text-xs text-amber-300 hover:text-white font-bold" title="Nghe lại lời thoại">↻ Nghe lại</button>
+        <button id="btn-close-speech" class="text-xs text-slate-300 hover:text-white">✕</button>
+      </div>
+    </div>
+    <p id="speech-text" class="text-xs sm:text-sm text-slate-100 leading-relaxed"></p>
+  </div>
+
+  <!-- Chalkboard Wish Modal (Room 101) -->
+  <div id="chalkboard-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-md w-full p-5 text-white border border-emerald-400/40">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span class="text-xs font-extrabold uppercase tracking-wider text-emerald-300">✍️ Viết Lời Chúc Lên Bảng Xanh 3D</span>
+        <button id="btn-close-chalk" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+      <textarea id="chalk-wish-input" rows="3" maxlength="110" placeholder="Nhập lời chúc tri ân gửi Thầy/Cô nhân ngày 20/11..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 p-3 text-xs sm:text-sm text-white focus:outline-none focus:border-emerald-400"></textarea>
+      <div class="flex gap-2 mt-4">
+        <button id="btn-cancel-chalk" class="flex-1 bg-white/10 hover:bg-white/20 py-2.5 rounded-xl text-xs font-semibold">Hủy</button>
+        <button id="btn-save-chalk" class="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold">Khắc Lên Bảng 3D</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wall Newspaper Modal (Room 102) -->
+  <div id="magazine-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-lg w-full p-5 sm:p-6 text-white border border-rose-400/40">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span class="text-xs font-extrabold uppercase tracking-wider text-rose-300">📰 Báo Tường 20/11 • Người Lái Đò Thầm Lặng</span>
+        <button id="btn-close-mag" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+      <div class="space-y-3 text-xs sm:text-sm text-slate-200 leading-relaxed max-h-72 overflow-y-auto pr-1">
+        <p class="italic text-amber-200">“Có một nghề bụi phấn bám đầy tay / Người ta bảo đó là nghề trong sạch nhất / Có một nghề không trồng cây vào đất / Mà mang lại cho đời đầy trái ngọt hoa tươi.”</p>
+        <p>Nhân ngày Nhà giáo Việt Nam 20/11, tập thể học sinh xin kính chúc quý Thầy Cô luôn dồi dào sức khỏe, hạnh phúc và mãi giữ ngọn lửa nhiệt huyết trên bục giảng!</p>
+      </div>
+      <button id="btn-ok-mag" class="mt-4 w-full bg-rose-500 hover:bg-rose-400 text-white py-2.5 rounded-xl text-xs font-bold">Đóng Báo Tường</button>
+    </div>
+  </div>
+
+  <!-- Lecture Slide Modal (Room 102) -->
+  <div id="slide-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-lg w-full p-5 sm:p-6 text-white border border-amber-400/40">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span class="text-xs font-extrabold uppercase tracking-wider text-amber-300">📽️ Slide Bài Giảng Chào Mừng 20/11</span>
+        <button id="btn-close-slide" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+      <div class="bg-slate-900/90 rounded-2xl p-4 border border-white/10 min-h-[150px] flex flex-col justify-center">
+        <h3 id="slide-modal-title" class="text-base sm:text-lg font-extrabold text-amber-300 mb-2"></h3>
+        <p id="slide-modal-body" class="text-xs sm:text-sm text-slate-200 leading-relaxed"></p>
+      </div>
+      <div class="flex items-center justify-between mt-4">
+        <button id="btn-prev-slide" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-xs font-bold">← Trước</button>
+        <span id="slide-modal-counter" class="text-xs font-bold text-slate-300">1 / 4</span>
+        <button id="btn-next-slide" class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold">Tiếp →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gallery Artwork Viewer Modal (Room 103) -->
+  <div id="artwork-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-lg w-full p-5 text-white border border-amber-400/40">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span id="art-modal-title" class="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-amber-300">Tác Phẩm Triển Lãm</span>
+        <button id="btn-close-art" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+      <img id="art-modal-img" alt="Tranh Triển Lãm 20/11" class="w-full h-56 object-cover rounded-2xl border border-amber-400/30 mb-3" />
+      <p id="art-modal-desc" class="text-xs sm:text-sm text-slate-200 leading-relaxed"></p>
+      <button id="btn-ok-art" class="mt-4 w-full bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold">Tiếp Tục Tham Quan</button>
+    </div>
+  </div>
+
+  <!-- Anthology Modal (Room 103) -->
+  <div id="anthology-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-lg w-full p-5 sm:p-6 text-white border border-amber-400/40">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span id="anthology-chapter" class="text-xs font-extrabold uppercase tracking-wider text-amber-300">Tập San Tri Ân 20/11</span>
+        <button id="btn-close-anthology" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+      </div>
+      <div id="anthology-book-tabs" class="flex flex-wrap gap-1.5 mb-3">
+        <button data-book="0" class="anthology-tab bg-amber-500 text-slate-950 px-2.5 py-1 rounded-xl text-[11px] font-extrabold transition">📖 Tập San 1</button>
+        <button data-book="1" class="anthology-tab bg-white/10 hover:bg-white/20 text-amber-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📕 Tập San 2</button>
+        <button data-book="2" class="anthology-tab bg-white/10 hover:bg-white/20 text-sky-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📘 Tập San 3</button>
+        <button data-book="3" class="anthology-tab bg-white/10 hover:bg-white/20 text-emerald-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📗 Tập San 4</button>
+        <button data-book="4" class="anthology-tab bg-white/10 hover:bg-white/20 text-purple-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📙 Tập San 5</button>
+      </div>
+      <div class="bg-amber-50/10 rounded-2xl p-4 border border-amber-300/20">
+        <h3 id="anthology-title" class="text-base font-extrabold text-amber-200 mb-2"></h3>
+        <p id="anthology-body" class="text-xs sm:text-sm text-slate-100 whitespace-pre-line leading-relaxed"></p>
+        <div id="anthology-author" class="text-right text-xs font-bold text-amber-300 mt-3"></div>
+      </div>
+      <div class="flex items-center justify-between mt-4">
+        <button id="btn-prev-anthology" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-xs font-bold">← Trang Trước</button>
+        <span id="anthology-counter" class="text-xs font-bold text-slate-300">1 / 3</span>
+        <button id="btn-next-anthology" class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold">Trang Sau →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Photo Zoom Modal (Room 301) -->
+  <div id="photo-zoom-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-xl w-full p-5 text-white border border-amber-400/40">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <span id="photo-zoom-title" class="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-amber-300">Kỷ Niệm Thầy Trò</span>
+        <div class="flex items-center gap-1.5">
+          <button id="btn-zoom-out" class="bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-lg text-xs font-bold">−</button>
+          <span id="photo-zoom-badge" class="text-xs font-bold text-amber-300 px-1.5">100%</span>
+          <button id="btn-zoom-in" class="bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-lg text-xs font-bold">+</button>
+          <button id="btn-zoom-reset" class="bg-white/10 hover:bg-white/20 px-2 py-1 rounded-lg text-[11px] font-semibold">1:1</button>
+          <button id="btn-close-photo-zoom" class="text-slate-300 hover:text-white text-lg font-bold pl-2">✕</button>
+        </div>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-amber-400/30 bg-slate-900 flex items-center justify-center h-64">
+        <img id="photo-zoom-img" alt="Ảnh Kỷ Niệm 301" class="photo-zoom-img w-full h-full object-contain" />
+      </div>
+      <p id="photo-zoom-desc" class="text-xs sm:text-sm text-slate-200 leading-relaxed mt-3"></p>
+      <div class="flex gap-2 mt-4">
+        <button id="btn-voice-photo" class="flex-1 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-200 py-2.5 rounded-xl text-xs font-bold">🔊 Nghe Thuyết Minh</button>
+        <button id="btn-ok-photo-zoom" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold">Đóng Khung Ảnh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tribute Tree Wish Card Modal (Room 302) -->
+  <div id="tribute-tree-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-2xl w-full p-5 sm:p-6 text-white border border-rose-400/40 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+        <div>
+          <span class="text-xs font-extrabold uppercase tracking-wider text-amber-300">🌳 Vườn Cây Tri Ân 302 • Lưu Chung Qua Link</span>
+          <div id="tribute-quota-badge" class="text-[11px] text-rose-300 font-semibold mt-0.5">🎁 Miễn phí: 2/2 thiệp</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-copy-share-link" class="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-200 px-3 py-1.5 rounded-xl text-xs font-bold">🔗 Copy Link</button>
+          <button id="btn-close-tribute-modal" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="space-y-2.5">
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-select-tree-left" type="button" class="tree-choice-btn bg-rose-500/25 border-2 border-rose-400 text-rose-200 text-xs font-bold py-2 px-2.5 rounded-xl transition">🌸 Cây Hoa Đào (Trái)</button>
+            <button id="btn-select-tree-right" type="button" class="tree-choice-btn bg-white/5 border border-white/15 text-amber-200 text-xs font-semibold py-2 px-2.5 rounded-xl transition">🌼 Cây Mai Vàng (Phải)</button>
+          </div>
+          <input id="tribute-teacher-input" type="text" maxlength="50" placeholder="Tên Thầy/Cô giáo muốn gửi gắm..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+          <textarea id="tribute-message-input" rows="3" maxlength="160" placeholder="Nhập lời tri ân chân thành nhân ngày 20/11..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 p-3 text-xs text-white focus:outline-none focus:border-amber-400"></textarea>
+          <input id="tribute-sender-input" type="text" maxlength="45" placeholder="Tên người gửi (VD: Học trò lớp 12A1)..." class="w-full rounded-xl bg-slate-900/90 border border-white/15 px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+          <div class="flex gap-2 pt-1">
+            <button id="btn-submit-tribute-card" type="button" class="flex-1 bg-rose-500 hover:bg-rose-400 text-white py-2.5 rounded-xl text-xs font-extrabold shadow-lg">💌 Treo Thiệp Lên Cây</button>
+            <button id="btn-open-buy-slot" type="button" class="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 px-3 py-2.5 rounded-xl text-xs font-bold">+1 Lượt (5k)</button>
+          </div>
+        </div>
+
+        <div class="flex flex-col">
+          <div class="text-xs font-bold text-amber-300 mb-2 flex items-center justify-between">
+            <span>📜 Thiệp Tri Ân Đã Lưu (<span id="tribute-total-count">0</span>)</span>
+            <span class="text-[11px] text-slate-400">Hiển thị cho mọi người</span>
+          </div>
+          <div id="tribute-cards-feed" class="space-y-2 max-h-60 overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+  <script src="script.js"></script>
+</body>
+</html>
