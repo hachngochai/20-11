@@ -1636,6 +1636,48 @@
       rightArm.userData.lowerPivot.add(bouquetMesh);
 
       function buildLeg(side) {
+        // Seated legs are modeled directly in local seated coordinates.
+        // This avoids stacking opposing 90-degree hip/knee rotations, which
+        // could visually detach the knees/feet after the avatar turns toward the desk.
+        if (isSeated) {
+          const seatedLeg = new THREE.Group();
+          seatedLeg.position.set(side * 0.084, hipY - 0.045, 0);
+
+          // Each part meets its neighboring joint: hip -> forward thigh -> knee -> vertical shin -> shoe.
+          const hipJoint = new THREE.Mesh(new THREE.SphereGeometry(0.063, 14, 12), pantsMat);
+          hipJoint.position.set(0, 0, 0.02);
+          seatedLeg.add(hipJoint);
+
+          const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.063, 0.054, 0.32, 16), pantsMat);
+          thigh.rotation.x = Math.PI / 2;
+          thigh.position.set(0, -0.02, 0.16);
+          thigh.castShadow = true;
+          seatedLeg.add(thigh);
+
+          const knee = new THREE.Mesh(new THREE.SphereGeometry(0.056, 14, 12), pantsMat);
+          knee.position.set(0, -0.04, 0.32);
+          knee.castShadow = true;
+          seatedLeg.add(knee);
+
+          const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.051, 0.041, 0.34, 16), pantsMat);
+          shin.position.set(0, -0.22, 0.32);
+          shin.castShadow = true;
+          seatedLeg.add(shin);
+
+          const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.108, 0.072, 0.215), shoeMat);
+          shoe.position.set(0, -0.39, 0.39);
+          shoe.castShadow = true;
+          seatedLeg.add(shoe);
+
+          const sole = new THREE.Mesh(new THREE.BoxGeometry(0.114, 0.021, 0.225), soleMat);
+          sole.position.set(0, -0.429, 0.394);
+          seatedLeg.add(sole);
+
+          root.add(seatedLeg);
+          seatedLeg.userData.lowerPivot = seatedLeg;
+          return seatedLeg;
+        }
+
         const hipPivot = new THREE.Group();
         hipPivot.position.set(side * 0.084, hipY - 0.04, 0);
 
@@ -1660,16 +1702,6 @@
         const sole = new THREE.Mesh(new THREE.BoxGeometry(0.112, 0.022, 0.222), soleMat);
         sole.position.set(0, -0.405, 0.045);
         lowerPivot.add(sole);
-
-        if (isSeated) {
-          // Local forward is +Z; the student meshes face -Z when rotated by PI.
-          // Correct sitting pose: thighs extend FORWARD, shins drop straight to the floor.
-          hipPivot.rotation.x = -Math.PI / 2;
-          lowerPivot.rotation.x = Math.PI / 2;
-          const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), pantsMat);
-          kneeCap.position.set(0, 0, 0);
-          lowerPivot.add(kneeCap);
-        }
 
         hipPivot.userData.lowerPivot = lowerPivot;
         root.add(hipPivot);
@@ -3290,7 +3322,8 @@
                 role: 'student',
                 isSeated: true
               });
-              st.position.set(dx + seatOffX, 0, dz + 0.44);
+              // Seat center is desk position + 0.46m; don't offset the torso from its chair.
+              st.position.set(dx + seatOffX, 0, dz + 0.46);
               st.rotation.y = Math.PI;
               classroomGroup.add(st);
               room101SeatedStudents.push({ mesh: st, phase: colIdx + rowIdx + seatIdx });
@@ -3376,7 +3409,7 @@
               role: 'student',
               isSeated: true
             });
-            st.position.set(dx - 0.36, 0, dz + 0.44);
+            st.position.set(dx - 0.36, 0, dz + 0.46);
             st.rotation.y = Math.PI;
             classroomGroup.add(st);
             activeIdleCharacters.push({ mesh: st, phase: colIdx + rowIdx * 1.4 });
