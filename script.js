@@ -2792,13 +2792,14 @@
         color:0xbdd5e2, transparent:true, opacity:0.26, roughness:0.45,
         depthWrite:false, side:THREE.DoubleSide
       });
-      box(2.1,1.55,0.05,0,2.68,-3.94,glass);
-      const border=box(2.25,1.72,0.09,0,2.68,-3.97,steel);
-      // Opaque border has a glass insert in front rather than a luminous billboard.
-      border.material=paint;
-      box(2.08,1.53,0.12,0,2.68,-3.89,glass);
-      box(0.06,1.57,0.11,0,2.68,-3.86,steel);
-      box(2.1,0.06,0.11,0,2.68,-3.86,steel);
+      // Transparent glazing is bounded by discrete metal frame bars.
+      box(2.09,1.55,0.07,0,2.68,-3.94,glass);
+      box(2.25,0.09,0.12,0,3.50,-3.89,steel);
+      box(2.25,0.09,0.12,0,1.87,-3.89,steel);
+      box(0.09,1.72,0.12,-1.12,2.68,-3.89,steel);
+      box(0.09,1.72,0.12,1.12,2.68,-3.89,steel);
+      box(0.07,1.55,0.11,0,2.68,-3.87,steel);
+      box(2.11,0.07,0.11,0,2.68,-3.87,steel);
 
       for(let i=0;i<n;i++){
         const height=(i+1)*rise;
@@ -4780,7 +4781,9 @@
       ];
       let previous=[start[0],goingUp?0:rise*2,start[2]];
       const steps=segments.map(item=>{const step={...item,start:previous};previous=item.end;return step;});
-      stairClimbAnim={stage:0,stageTime:0,progress:0,steps,targetHallwayMode,goingUp};
+      stairClimbAnim={stage:0,stageTime:0,progress:0,steps,targetHallwayMode,goingUp,
+        descentCut: goingUp ? 0 : 0.42 };
+      if(!goingUp) setSceneCurtain(true);
       resetHeroMotion();
       // Camera is controlled by the animation until the second flight is completed.
       if(controls && !isFirstPersonPOV) controls.enabled=false;
@@ -5296,6 +5299,15 @@
       }
       if (stairClimbAnim) {
         const a=stairClimbAnim;
+        // A descent begins from the upper floor's stairwell reference frame:
+        // hide that one-time rebase to avoid a visible 3.8-metre vertical snap.
+        if (a.descentCut > 0) {
+          a.descentCut = Math.max(0,a.descentCut - dt);
+          if (a.descentCut === 0 && roomHero) {
+            roomHero.position.y = 3.8;
+            setSceneCurtain(false);
+          }
+        } else {
         const seg=a.steps[a.stage];
         if(seg && roomHero) {
           a.stageTime=Math.min(seg.seconds,a.stageTime+dt);
@@ -5323,6 +5335,7 @@
               switchSceneMode(next);
             }
           }
+        }
         }
       }
       if (room101GiftAnim && roomHero && room101Teacher) updateGiftCeremony(room101GiftAnim,dt,elapsed);
