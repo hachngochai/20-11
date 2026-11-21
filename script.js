@@ -964,57 +964,50 @@
       return material;
     }
 
-    function createSignBoard(text, bg = '#7f1d1d', border = '#facc15', textColor = '#fef08a', width = 4, height = 0.8, isVertical = false) {
-      const aspect = Math.max(0.15, width / Math.max(0.15, height));
-      const cw = isVertical ? 256 : Math.min(1024, Math.max(512, Math.round(256 * aspect)));
-      const ch = isVertical ? 1024 : 256;
-      const cacheKey = `sign_${text}_${bg}_${border}_${textColor}_${cw}x${ch}_${isVertical}`;
-      const tex = makeCanvasTexture(cacheKey, cw, ch, (ctx, w, h) => {
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, w, h);
-        ctx.strokeStyle = border;
-        ctx.lineWidth = isVertical ? 14 : 16;
-        ctx.strokeRect(10, 10, w - 20, h - 20);
-        ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(20, 20, w - 40, h - 40);
-
-        ctx.fillStyle = textColor;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        if (isVertical) {
-          const words = String(text).split(/\s+/).filter(Boolean);
-          const stepY = (h - 120) / Math.max(1, words.length);
-          const fSize = Math.min(56, Math.floor(stepY * 0.65));
-          ctx.font = `800 ${fSize}px Inter, sans-serif`;
-          words.forEach((word, idx) => {
-            ctx.fillText(word, w / 2, 70 + stepY * (idx + 0.5), w - 44);
-          });
-        } else {
-          let fontSize = 68;
-          ctx.font = `800 ${fontSize}px Inter, sans-serif`;
-          while (ctx.measureText(text).width > w - 64 && fontSize > 22) {
-            fontSize -= 2;
-            ctx.font = `800 ${fontSize}px Inter, sans-serif`;
+    function createSignBoard(text, bg='#7f1d1d', border='#facc15', textColor='#fef08a', width=4, height=0.8, isVertical=false) {
+      const aspect=Math.max(0.16,width/Math.max(0.15,height));
+      const density=graphicsUltra?1.5:1;
+      const baseW=isVertical?320:Math.min(1536,Math.max(640,Math.round(330*aspect)));
+      const baseH=isVertical?1280:320;
+      const cw=Math.round(baseW*density),ch=Math.round(baseH*density);
+      const key=['sign8',text,bg,border,textColor,cw,ch,isVertical].join('_');
+      const texture=makeCanvasTexture(key,cw,ch,(ctx,w,h)=>{
+        ctx.save();ctx.scale(w/baseW,h/baseH);
+        ctx.imageSmoothingQuality='high';
+        const W=baseW,H=baseH;
+        const gradient=ctx.createLinearGradient(0,0,W,H);
+        gradient.addColorStop(0,bg);gradient.addColorStop(0.64,bg);gradient.addColorStop(1,'#141d29');
+        ctx.fillStyle=gradient;ctx.fillRect(0,0,W,H);
+        ctx.strokeStyle=border;ctx.lineWidth=11;ctx.strokeRect(11,11,W-22,H-22);
+        ctx.strokeStyle='rgba(255,255,255,0.22)';ctx.lineWidth=2;
+        ctx.strokeRect(25,25,W-50,H-50);
+        ctx.fillStyle='rgba(255,255,255,0.045)';ctx.fillRect(28,30,W-56,H*0.25);
+        ctx.shadowColor='rgba(0,0,0,0.35)';ctx.shadowBlur=3;
+        ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=textColor;
+        if(isVertical){
+          const words=String(text).split(/\s+/).filter(Boolean);
+          const step=(H-150)/Math.max(1,words.length);
+          const fs=Math.min(63,Math.floor(step*0.69));
+          ctx.font='800 '+fs+'px Inter,Arial,sans-serif';
+          words.forEach((word,i)=>ctx.fillText(word,W/2,75+(i+0.5)*step,W-44));
+        }else{
+          let fontSize=Math.round(H*0.28);
+          ctx.font='800 '+fontSize+'px Inter,Arial,sans-serif';
+          while(ctx.measureText(text).width>W-95 && fontSize>24){
+            fontSize-=2;ctx.font='800 '+fontSize+'px Inter,Arial,sans-serif';
           }
-          ctx.fillText(text, w / 2, h / 2 + 2, w - 56);
+          ctx.fillText(text,W/2,H/2+4,W-75);
         }
+        ctx.restore();
       });
-
-      const group = new THREE.Group();
-      const frame = new THREE.Mesh(
-        new THREE.BoxGeometry(width + 0.08, height + 0.08, 0.08),
-        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.35, metalness: 0.5 })
-      );
-      group.add(frame);
-
-      const face = new THREE.Mesh(
-        new THREE.PlaneGeometry(width, height),
-        new THREE.MeshBasicMaterial({ map: tex })
-      );
-      face.position.z = 0.045;
-      group.add(face);
-      return group;
+      const frame=new THREE.Group();
+      const metal=new THREE.MeshStandardMaterial({color:0x283443,roughness:0.56,metalness:0.32});
+      const back=new THREE.Mesh(new THREE.BoxGeometry(width+0.09,height+0.09,0.10),metal);
+      back.castShadow=true;back.receiveShadow=true;frame.add(back);
+      const face=new THREE.Mesh(new THREE.PlaneGeometry(width,height),
+        new THREE.MeshBasicMaterial({map:texture,toneMapped:false,side:THREE.DoubleSide}));
+      face.position.z=0.057;frame.add(face);
+      return frame;
     }
 
     function createArtCanvasDataURL(art) {
@@ -3005,7 +2998,7 @@
         targetGroup.add(pt);
       });
 
-      const wallMat = new THREE.MeshStandardMaterial({ color: theme.wallAccentHex, roughness: 0.58 });
+      const wallMat = getProceduralPBRMaterial('plaster',theme.wallAccentHex,0.87,0,3);
       const dadoMat = getProceduralPBRMaterial('wood', 0x92400e, 0.48, 0.08, 4);
 
       // Door openings correspond to the interactive frames; no overlapping wall panels.
@@ -3132,7 +3125,7 @@
       ceil.position.set(0, height + 0.1, 0);
       targetGroup.add(ceil);
 
-      const wallMat = new THREE.MeshStandardMaterial({ color: theme.wallAccentHex, roughness: 0.58 });
+      const wallMat = getProceduralPBRMaterial('plaster',theme.wallAccentHex,0.87,0,3);
       const dadoMat = getProceduralPBRMaterial('wood', 0x92400e, 0.5, 0.06, 4);
 
       const backW = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.24), wallMat);
