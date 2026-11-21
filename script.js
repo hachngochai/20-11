@@ -238,6 +238,17 @@
     let campusHero = null;
     let scooterRiderMesh = null;
     let roomHero = null;
+    // One real Object3D persists from the scooter to both buildings,
+    // every corridor and the gifting ceremony. Never create a duplicate hero.
+    let protagonist = null;
+    const PROTAGONIST_ID = 'twenty_november_student_01';
+    const PROTAGONIST_APPEARANCE = Object.freeze({
+      gender: 'male', role: 'student',
+      shirtColor: 0xf8fafc, pantsColor: 0x1e293b,
+      hairColor: 0x18181b, skinColor: 0xf8d0b8,
+      hasBouquet: true, isSeated: false,
+      keepOriginalAppearance: true
+    });
     let floatingPetals = [];
     let activeIdleCharacters = [];
 
@@ -1689,7 +1700,8 @@
         hairColor = 0x18181b,
         skinColor = 0xf8d0b8,
         hasBouquet = false,
-        isSeated = false
+        isSeated = false,
+        keepOriginalAppearance = false
       } = opts;
 
       const root = new THREE.Group();
@@ -1972,8 +1984,55 @@
       }
 
       root.userData = { leftLeg, rightLeg, leftArm, rightArm, headGroup, bouquetMesh, isSeated };
-      upgradeStandingHuman(root, {gender,role,hasBouquet,isSeated});
+      // The same hand-built actor must remain recognizable on the scooter
+      // and at the ceremony: other NPCs can still use the external GLB rigs.
+      if (!keepOriginalAppearance) upgradeStandingHuman(root, {gender,role,hasBouquet,isSeated});
       return root;
+    }
+
+    function getProtagonist() {
+      if (!protagonist) {
+        protagonist = createRealisticHuman(PROTAGONIST_APPEARANCE);
+        protagonist.name = PROTAGONIST_ID;
+        protagonist.userData.characterId = PROTAGONIST_ID;
+        protagonist.userData.isProtagonist = true;
+        protagonist.userData.storyRole = 'The same student who rides to school and presents flowers';
+      }
+      return protagonist;
+    }
+
+    function setProtagonistPose(mode, withBouquet = true) {
+      const hero = getProtagonist();
+      const data = hero.userData;
+      const riding = mode === 'riding';
+      data.isRiding = riding;
+      data.isSeated = false; // Standing rig's joints can now change pose.
+      data.walkBlend = 0;
+      data.walkTime = 0;
+      [data.leftLeg, data.rightLeg].forEach(hip => {
+        if (!hip) return;
+        hip.rotation.x = riding ? -1.16 : 0;
+        hip.rotation.y = 0;
+        hip.rotation.z = 0;
+        if (hip.userData.lowerPivot) {
+          hip.userData.lowerPivot.rotation.x = riding ? 1.13 : 0;
+          hip.userData.lowerPivot.rotation.z = 0;
+        }
+      });
+      if(data.leftArm){
+        data.leftArm.rotation.set(riding ? -0.95 : 0, 0, riding ? -0.08 : 0);
+        if(data.leftArm.userData.lowerPivot)
+          data.leftArm.userData.lowerPivot.rotation.x = riding ? -0.15 : 0;
+      }
+      if(data.rightArm){
+        data.rightArm.rotation.set(riding ? -0.95 : 0, 0, riding ? 0.08 : 0);
+        if(data.rightArm.userData.lowerPivot)
+          data.rightArm.userData.lowerPivot.rotation.x = riding ? -0.15 : 0;
+      }
+      if(data.headGroup)data.headGroup.rotation.set(0,0,0);
+      if(data.bouquetMesh)data.bouquetMesh.visible = !riding && withBouquet;
+      // The same body and clothing persist across all stages.
+      return hero;
     }
 
     function createHondaCubScooter() {
@@ -2052,17 +2111,11 @@
         wheels.push(wheel);
       });
 
-      const rider = createRealisticHuman({
-        gender: 'male',
-        role: 'student',
-        shirtColor: 0xffffff,
-        pantsColor: 0x1e293b,
-        isSeated: true
-      });
-      rider.position.set(0, 0.35, 0.06);
+      // It is exactly the same actor who will later walk through school.
+      // Ride pose changes joints on the existing body; no separate rider mesh.
+      const rider = setProtagonistPose('riding', false);
+      rider.position.set(0, 0.01, 0.06);
       rider.rotation.y = Math.PI;
-      rider.userData.leftArm.rotation.x = -0.95;
-      rider.userData.rightArm.rotation.x = -0.95;
       group.add(rider);
 
       [-0.32, 0.32].forEach((mx) => {
@@ -2822,10 +2875,9 @@
       campusScooterGroup.position.set(0, 0.14, 18);
       campusGroup.add(campusScooterGroup);
 
-      campusHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
-      campusHero.position.set(0.85, 0.14, 17.6);
-      campusHero.rotation.y = Math.PI;
-      campusGroup.add(campusHero);
+      // During the intro, the single protagonist is riding the scooter.
+      // Dismounting reparents this same mesh to the campus, not a clone.
+      campusHero = getProtagonist();
 
       addCampusCinematicPolish(campusGroup);
       campusGroup.traverse((o) => {
@@ -3352,7 +3404,7 @@
         exit_to_campus: exitCampusDoor.pivots
       };
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       placeHallwayAvatar(roomHero);
       roomHero.rotation.y = Math.PI;
       hallwayGroup.add(roomHero);
@@ -3585,7 +3637,7 @@
         });
       }
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: currentBuildingSide === 'teacher' });
+      roomHero = setProtagonistPose('walking', currentBuildingSide === 'teacher');
       roomHero.position.set(0, 0, 4.4);
       roomHero.rotation.y = Math.PI;
       classroomGroup.add(roomHero);
@@ -3688,7 +3740,7 @@
         activeIdleCharacters.push({ mesh: room102Teacher, phase: 0.6 });
       }
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       roomHero.position.set(0, 0, 4.4);
       roomHero.rotation.y = Math.PI;
       classroomGroup.add(roomHero);
@@ -3962,7 +4014,7 @@
         activeIdleCharacters.push({ mesh: visitor, phase: idx * 1.2 });
       });
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       roomHero.position.set(0, 0, 4.4);
       roomHero.rotation.y = Math.PI;
       classroomGroup.add(roomHero);
@@ -4002,7 +4054,7 @@
       hallway2Group.add(d201.group, d202.group);
       hallway2Group.userData.doors = { enter_201: d201.pivots, enter_202: d202.pivots };
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       placeHallwayAvatar(roomHero);
       roomHero.rotation.y = Math.PI;
       hallway2Group.add(roomHero);
@@ -4178,7 +4230,7 @@
         });
       }
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       roomHero.position.set(0, 0, 5.8);
       roomHero.rotation.y = Math.PI;
       auditoriumGroup.add(roomHero);
@@ -4339,7 +4391,7 @@
         room202State.interviewee = interviewee;
       }
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       roomHero.position.set(0, 0, 4.8);
       roomHero.rotation.y = Math.PI;
       auditoriumGroup.add(roomHero);
@@ -4379,7 +4431,7 @@
       hallway3Group.add(d301.group, d302.group);
       hallway3Group.userData.doors = { enter_301: d301.pivots, enter_302: d302.pivots };
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       placeHallwayAvatar(roomHero);
       roomHero.rotation.y = Math.PI;
       hallway3Group.add(roomHero);
@@ -4579,7 +4631,7 @@
         });
       }
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: currentBuildingSide === 'teacher' });
+      roomHero = setProtagonistPose('walking', currentBuildingSide === 'teacher');
       roomHero.position.set(0, 0, 4.8);
       roomHero.rotation.y = Math.PI;
       floor3RoomGroup.add(roomHero);
@@ -4795,7 +4847,7 @@
         refresh302TreeHangingCards();
       }
 
-      roomHero = createRealisticHuman({ gender: 'male', role: 'student', hasBouquet: true });
+      roomHero = setProtagonistPose('walking', true);
       roomHero.position.set(0, 0, 5.0);
       roomHero.rotation.y = Math.PI;
       floor3RoomGroup.add(roomHero);
@@ -4913,6 +4965,13 @@
         setClassroomControls([]);
         updateHeaderStatus('Khuôn Viên Tri Ân 20/11');
         if (campusGroup.children.length === 0) buildCampusScene();
+        // Scooter -> campus: move ONE Object3D to the walking scene.
+        campusHero = setProtagonistPose('walking', true);
+        if (campusHero.parent !== campusGroup) {
+          campusGroup.add(campusHero);
+          campusHero.position.set(0.85, 0.14, 17.6);
+          campusHero.rotation.y = Math.PI;
+        }
         campusGroup.traverse((o) => {
           if (o.isMesh && o.userData && o.userData.interactiveType) interactiveList.push(o);
         });
@@ -5056,14 +5115,14 @@
       if (sceneMode !== 'campus') switchSceneMode('campus');
       const targetX = side === 'female' ? 8.6 : -8.6;
       const targetZ = -2.0;
-      if (campusHero) {
-        campusHero.position.set(0, 0.14, 15.5);
-      }
-      if (scooterRiderMesh) scooterRiderMesh.visible = false;
+      // Walk from the current dismount position. Hiding scooterRiderMesh
+      // would hide campusHero as well: they now refer to the SAME mesh.
+      const startX = campusHero?.position.x ?? 0.85;
+      const startZ = campusHero?.position.z ?? 17.6;
       campusEnterBuildingAnim = {
         progress: 0,
-        startX: 0,
-        startZ: 15.5,
+        startX,
+        startZ,
         targetX,
         targetZ,
         side
@@ -5649,8 +5708,9 @@
     // =========================================================================
     function animateHumanWalk(char, elapsed, speed = 8, dt = 0.016, amount = 1) {
       if (!char || !char.userData) return;
-      // A seated character must not inherit walking leg rotations.
-      if (char.userData.isSeated) return;
+      // A seated student or the protagonist riding the scooter must not
+      // inherit the normal walking gait.
+      if (char.userData.isSeated || char.userData.isRiding) return;
       const data=char.userData;
       const moving=speed>0.5;
       const a=1-Math.exp(-dt*8.5);
