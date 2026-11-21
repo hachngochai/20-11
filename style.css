@@ -60,3 +60,67 @@
 @media (max-width:640px) {
   #canvas-container::after {background:radial-gradient(ellipse 95% 85% at 51% 42%,transparent 53%,rgba(6,13,25,.20) 100%);}
 }
+
+
+/* V8: bound-paper anthology, natural page depth and a real hinged leaf. */
+.anthology-viewer { max-height:96vh; overflow:auto; }
+#anthology-book-tabs { scrollbar-width:thin; scrollbar-color:#c8a977 transparent; }
+.anthology-tab { flex-shrink:0; background:rgba(255,255,255,.09); color:#f1dfb6; border:1px solid rgba(255,255,255,.10); }
+.anthology-tab:hover { background:rgba(255,255,255,.17); }
+.anthology-tab.anthology-tab-active { background:#e9b965; border-color:#fff0c5; color:#44260e; }
+.anthology-book-shell {
+  --paper:#f7ecd4; position:relative; width:100%; min-height:390px; aspect-ratio:2.05/1;
+  display:flex; perspective:1550px; border-radius:6px 14px 14px 6px;
+  background:#5a3028; border:9px solid #69392c; box-shadow:0 5px 0 #2c1a17,0 15px 25px rgba(0,0,0,.48),0 35px 80px rgba(0,0,0,.31);
+  touch-action:pan-y; cursor:grab; user-select:none; overflow:visible;
+}
+.anthology-book-shell:active{cursor:grabbing;}
+.anthology-book-shell::before {
+  content:"";z-index:3;position:absolute;left:calc(50% - 9px);top:0;bottom:0;width:18px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(47,26,13,.37) 35%,rgba(47,26,13,.40) 55%,transparent);
+}
+.anthology-paper{
+  width:50%;padding:30px 36px 28px;position:relative; overflow:hidden;
+  color:#372b20; background:linear-gradient(110deg,#eadab8 0%,#fff8e8 12%,#f6e8cf 85%,#e8d5af 100%);
+  border:1px solid #bca37e; display:flex;flex-direction:column;
+}
+.anthology-paper-left {border-radius:3px 0 0 3px;box-shadow:inset -9px 0 17px rgba(54,32,12,.13);}
+.anthology-paper-right {border-radius:0 3px 3px 0;box-shadow:inset 9px 0 17px rgba(54,32,12,.17);}
+.anthology-paper-top {font:700 10px/1.5 Georgia,serif;letter-spacing:2px;color:#906536;padding-bottom:12px;border-bottom:1px solid #d6c0a1;}
+.anthology-page-title {font:700 clamp(17px,2vw,29px)/1.2 Georgia,"Times New Roman",serif;color:#683c2b;margin:20px 0 12px;}
+.anthology-page-text {font:400 clamp(12px,1.15vw,16px)/1.83 Georgia,serif;white-space:pre-line; overflow-wrap:anywhere; }
+.anthology-flourish {font-size:25px;color:#bc8656;align-self:center;margin-top:14px;}
+.anthology-ink-decoration {font-size:38px;color:#bc8656;align-self:center;margin:22px 0;}
+.anthology-page-author {margin-top:auto;text-align:right;font:italic 600 14px Georgia,serif;color:#825837;padding-bottom:17px;}
+.anthology-page-number {position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font:700 12px Georgia,serif;color:#b38b62;}
+.anthology-turn-sheet {
+  position:absolute;top:0;bottom:0;left:50%;width:50%;z-index:5;
+  transform-origin:left center;transform:rotateY(0deg);pointer-events:none;
+  transform-style:preserve-3d;opacity:0;visibility:hidden;
+}
+.anthology-turn-front,.anthology-turn-back {
+  position:absolute;inset:0;backface-visibility:hidden;
+  background:linear-gradient(90deg,#eddbb8,#fff8e8 40%,#e8d2a7);
+  box-shadow:-4px 0 15px rgba(46,28,13,.2);border:1px solid #c4ae86;
+}
+.anthology-turn-back {transform:rotateY(180deg);background:linear-gradient(90deg,#ebd3aa,#fff9e6 75%,#ead6b4);}
+.anthology-turn-paper-lines {margin:70px 14%;height:58%;opacity:.16;
+  background:repeating-linear-gradient(180deg,transparent 0 24px,#8e6747 25px,#8e6747 26px,transparent 27px 34px);}
+.anthology-book-shell.turning-next .anthology-turn-sheet {opacity:1;visibility:visible;animation:page-turn-next .65s cubic-bezier(.27,.08,.12,.98) both;}
+.anthology-book-shell.turning-prev .anthology-turn-sheet {opacity:1;visibility:visible;animation:page-turn-prev .65s cubic-bezier(.27,.08,.12,.98) both;}
+@keyframes page-turn-next {0%{transform:rotateY(0deg)}48%{transform:rotateY(-86deg) translateZ(18px)}100%{transform:rotateY(-180deg)}}
+@keyframes page-turn-prev {0%{transform:rotateY(-180deg)}48%{transform:rotateY(-94deg) translateZ(18px)}100%{transform:rotateY(0deg)}}
+@media(max-width:680px){
+  .anthology-book-shell{min-height:350px;aspect-ratio:1.35/1;border-width:6px;}
+  .anthology-paper{padding:15px 13px 22px;}
+  .anthology-page-title{font-size:16px;margin:12px 0 7px;}
+  .anthology-page-text{font-size:11px;line-height:1.62;}
+  .anthology-page-author{font-size:11px;}
+  .anthology-paper-top{font-size:8px;letter-spacing:0.8px;}
+  .anthology-flourish{margin-top:8px;}
+  .anthology-ink-decoration{margin:10px 0;font-size:26px;}
+}
+@media(prefers-reduced-motion:reduce){
+  .anthology-book-shell.turning-next .anthology-turn-sheet,
+  .anthology-book-shell.turning-prev .anthology-turn-sheet{animation-duration:.01ms;}
+}
