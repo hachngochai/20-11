@@ -258,6 +258,12 @@
     let currentSlideIdx = 0;
     let currentAnthologyBookIdx = 0;
     let currentAnthologyPageIdx = 0;
+    let anthologyTurning = false;
+    let room103Reader = null;
+    let room103ReaderBook = null;
+    let room103PageTurn = null;
+    let room103LastAutoTurn = 0;
+    let anthologySwipeStart = null;
 
     let room201Performers = [];
     let room201Audience = [];
@@ -1526,7 +1532,7 @@
               bouquet.scale.setScalar(0.78);
             }
           }
-          originalChildren.forEach(child => { child.visible=false; });
+          originalChildren.forEach(child => { if (!child.userData?.keepWithEnhanced) child.visible=false; });
           root.add(body);
           if (interaction) {
             body.traverse(obj => {
@@ -3546,6 +3552,134 @@
       });
     }
 
+
+    function makeAnthologyCoverTexture(index) {
+      const canvas=document.createElement('canvas');
+      canvas.width=512;canvas.height=640;
+      const c=canvas.getContext('2d');
+      const colors=['#7f1d1d','#075985','#166534','#92400e','#581c87'];
+      c.fillStyle=colors[index%5];
+      c.fillRect(0,0,512,640);
+      c.fillStyle='rgba(253,230,138,0.86)';
+      c.fillRect(26,28,460,4);c.fillRect(26,605,460,4);
+      c.fillRect(27,30,4,580);c.fillRect(481,30,4,580);
+      c.strokeStyle='rgba(255,240,200,0.3)';
+      c.lineWidth=2;
+      for(let r=0;r<5;r++){
+        c.beginPath();c.arc(256,312,105+r*23,Math.PI*1.15,Math.PI*1.85);c.stroke();
+      }
+      c.textAlign='center';c.fillStyle='#fef3c7';
+      c.font='700 27px Georgia,serif';c.fillText('TẬP SAN TRI ÂN',256,128);
+      c.font='bold 78px Georgia,serif';c.fillText(String(index+1).padStart(2,'0'),256,263);
+      c.font='bold 32px Arial,sans-serif';
+      const name=ANTHOLOGY_BOOKS[index].name.split(': ')[1]||ANTHOLOGY_BOOKS[index].name;
+      const words=name.split(/\s+/),lines=[];let line='';
+      words.forEach(word=>{
+        const candidate=line?line+' '+word:word;
+        if(line && c.measureText(candidate).width>400){lines.push(line);line=word;}
+        else line=candidate;
+      });
+      if(line)lines.push(line);
+      lines.slice(0,4).forEach((text,i)=>c.fillText(text,256,375+i*43));
+      c.font='700 23px Arial,sans-serif';
+      c.fillText('20 NOVEMBER  •  ẤN BẢN KỶ NIỆM',256,569);
+      const tex=new THREE.CanvasTexture(canvas);
+      tex.encoding=THREE.sRGBEncoding;
+      tex.anisotropy=renderer?.capabilities?.getMaxAnisotropy?.()||1;
+      return tex;
+    }
+
+    function createGalleryAnthologyModel(index) {
+      const colors=[0x991b1b,0x075985,0x166534,0x92400e,0x6b21a8];
+      const coverMat=new THREE.MeshStandardMaterial({color:colors[index%5],roughness:0.76});
+      const pagesMat=new THREE.MeshStandardMaterial({color:0xfff6df,roughness:0.95});
+      const trimMat=new THREE.MeshStandardMaterial({color:0xd6b974,metalness:0.32,roughness:0.54});
+      const group=new THREE.Group();
+      function addBox(w,h,d,x,y,z,mat){
+        const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+        mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;
+        mesh.userData.interactiveType='open_anthology';
+        mesh.userData.bookIndex=index;
+        group.add(mesh);return mesh;
+      }
+      addBox(0.68,0.045,0.51,0,0,0,coverMat);
+      addBox(0.63,0.092,0.46,0,0.051,0,pagesMat);
+      addBox(0.68,0.032,0.51,0,0.112,0,coverMat);
+      addBox(0.048,0.12,0.51,-0.32,0.056,0,trimMat);
+      for(let i=0;i<5;i++)
+        addBox(0.57,0.002,0.45,0,0.016+i*0.018,0,pagesMat);
+      const top=new THREE.Mesh(new THREE.PlaneGeometry(0.62,0.46),
+        new THREE.MeshBasicMaterial({map:makeAnthologyCoverTexture(index),side:THREE.DoubleSide}));
+      top.rotation.x=-Math.PI/2;
+      top.position.set(0,0.131,0);
+      top.userData={interactiveType:'open_anthology',bookIndex:index};
+      group.add(top);
+      const glint=new THREE.Mesh(new THREE.BoxGeometry(0.008,0.008,0.48),trimMat);
+      glint.position.set(0.302,0.13,0);group.add(glint);
+      return group;
+    }
+
+    function createHandheldReadingBook() {
+      const group=new THREE.Group();
+      const cover=new THREE.MeshStandardMaterial({color:0x7c2d12,roughness:0.75,side:THREE.DoubleSide});
+      const paper=new THREE.MeshStandardMaterial({color:0xfff4d6,roughness:0.91,side:THREE.DoubleSide});
+      const ink=new THREE.MeshStandardMaterial({color:0xb6a58d,roughness:1});
+      // Two open covers and real page stacks, hinged at the spine.
+      [-0.14,0.14].forEach((x,side)=>{
+        const back=new THREE.Mesh(new THREE.BoxGeometry(0.29,0.018,0.38),cover);
+        back.position.set(x,-0.018,0);
+        group.add(back);
+        const pile=new THREE.Mesh(new THREE.BoxGeometry(0.278,0.024,0.355),paper);
+        pile.position.set(x,0,0);pile.receiveShadow=true;group.add(pile);
+        for(let l=0;l<5;l++){
+          const line=new THREE.Mesh(new THREE.BoxGeometry(0.20,0.0007,0.006),ink);
+          line.position.set(x,0.016,-0.12+l*0.053);group.add(line);
+        }
+      });
+      const spine=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.38,10),cover);
+      spine.rotation.x=Math.PI/2;spine.position.y=-0.025;group.add(spine);
+      const hinge=new THREE.Group();
+      const leaf=new THREE.Mesh(new THREE.BoxGeometry(0.274,0.002,0.356),paper);
+      leaf.position.x=0.137;hinge.add(leaf);hinge.position.y=0.02;group.add(hinge);
+      group.userData.leaf=hinge;
+      return group;
+    }
+
+    function beginRoom103PageTurn(direction=1) {
+      if(sceneMode!=='room103'||!room103ReaderBook) return;
+      room103PageTurn={time:0,duration:0.78,direction:Math.sign(direction)||1};
+      room103LastAutoTurn=0;
+    }
+
+    function animateRoom103Reader(dt,elapsed) {
+      if(sceneMode!=='room103'||!room103Reader||!room103ReaderBook)return;
+      const data=room103Reader.userData||{};
+      const nod=Math.sin(elapsed*1.22)*0.026;
+      if(data.headGroup) data.headGroup.rotation.x=0.21+nod;
+      if(data.leftArm) {
+        data.leftArm.rotation.x=-0.73+nod*0.4;
+        data.leftArm.rotation.z=-0.25;
+      }
+      if(data.rightArm) {
+        data.rightArm.rotation.x=-0.78+nod*0.55;
+        data.rightArm.rotation.z=0.21;
+      }
+      room103ReaderBook.position.y=1.035+Math.sin(elapsed*1.5)*0.008;
+      room103ReaderBook.rotation.x=-0.16+Math.sin(elapsed*0.72)*0.014;
+      const leaf=room103ReaderBook.userData.leaf;
+      if(room103PageTurn){
+        const g=room103PageTurn;
+        g.time=Math.min(g.duration,g.time+dt);
+        const t=smooth01(g.time/g.duration);
+        if(leaf)leaf.rotation.z=g.direction*Math.PI*t;
+        if(data.rightArm) data.rightArm.rotation.x=-0.78-Math.sin(t*Math.PI)*0.28;
+        if(t>=1){room103PageTurn=null;if(leaf)leaf.rotation.z=0;}
+      }else{
+        room103LastAutoTurn+=dt;
+        if(room103LastAutoTurn>11.5) beginRoom103PageTurn(1);
+      }
+    }
+
     function buildRoom103() {
       while (classroomGroup.children.length > 0) classroomGroup.remove(classroomGroup.children[0]);
 
@@ -3619,24 +3753,35 @@
       });
 
       const pedMat = getProceduralPBRMaterial('wood', 0x78350f, 0.4);
-      const bookColors = [0xdc2626, 0x0284c7, 0x16a34a, 0xd97706, 0x7c3aed];
-      for (let b = 0; b < 5; b++) {
-        const px = -4.2 + b * 2.1;
-        const ped = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.0, 0.8), pedMat);
-        ped.position.set(px, 0.5, -1.6);
-        ped.castShadow = true;
+      for(let b=0;b<ANTHOLOGY_BOOKS.length;b++){
+        const px=-4.2+b*2.1;
+        const ped = new THREE.Mesh(new THREE.BoxGeometry(0.95,1.0,0.8),pedMat);
+        ped.position.set(px,0.5,-1.6);
+        ped.castShadow=true;
         classroomGroup.add(ped);
         registerCollider(px,-1.6,0.95,0.8,0.14);
-
-        const book = new THREE.Mesh(
-          new THREE.BoxGeometry(0.55, 0.08, 0.42),
-          new THREE.MeshStandardMaterial({ color: bookColors[b], roughness: 0.35 })
-        );
-        book.position.set(px, 1.06, -1.6);
-        book.rotation.x = 0.22;
-        book.userData = { interactiveType: 'open_anthology', bookIndex: b };
-        classroomGroup.add(book);
+        const nameplate=createGalleryAnthologyModel(b);
+        nameplate.position.set(px,1.075,-1.6);
+        nameplate.rotation.y = -0.12 + 0.06*b;
+        classroomGroup.add(nameplate);
       }
+
+      // Reading corner: a student holds an opened book, follows each line
+      // with their gaze and turns a physical page on a regular interval.
+      room103Reader = createRealisticHuman({
+        gender:'female',role:'student',shirtColor:0xf8fafc,
+        hairColor:0x1c1917,hasBouquet:false
+      });
+      room103Reader.position.set(0.05,0,-0.05);
+      room103Reader.rotation.y=Math.PI;
+      classroomGroup.add(room103Reader);
+      room103ReaderBook=createHandheldReadingBook();
+      room103ReaderBook.userData.keepWithEnhanced=true;
+      room103ReaderBook.position.set(0,1.02,0.34);
+      room103ReaderBook.rotation.x=-0.16;
+      room103Reader.add(room103ReaderBook);
+      room103LastAutoTurn=0;
+      room103PageTurn=null;
 
       // 3 Gallery Visitors admiring paintings & anthologies
       [
@@ -5520,6 +5665,8 @@
         giftBloom.time += dt;
         if (giftBloom.time >= 0.7) giftBloom = null;
       }
+
+      animateRoom103Reader(dt,elapsed);
 
       if (sceneMode === 'room201') {
         room201Performers.forEach((p, idx) => {
