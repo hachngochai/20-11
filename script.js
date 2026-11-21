@@ -3470,6 +3470,9 @@
       }
 
       if (currentBuildingSide === 'female') {
+        const festiveClearance=createSceneClearancePlanner(14,12);
+        festiveClearance.reserve('teacher platform',0,-4.65,3.2,1.85,0.05);
+        festiveClearance.reserve('class exit',0,5.15,2.35,0.75,0.04);
         // Festive balloons & triangle bunting garlands
         for (let b = 0; b < 18; b++) {
           const balloon = new THREE.Mesh(
@@ -3495,8 +3498,11 @@
         // Student desks & chairs arranged in festive classroom groups
         [[-3.2, -1.6], [3.2, -1.6], [-3.2, 1.4], [3.2, 1.4]].forEach(([dx, dz]) => {
           const dGroup = createStudentDeskAndChair(true, true);
-          dGroup.position.set(dx, 0, dz);
+          const seatCluster=festiveClearance.find('student desk cluster',dx,dz+0.19,1.72,1.24,0.10,0.4);
+          if(!seatCluster)return;
+          dGroup.position.set(seatCluster.x,0,seatCluster.z-0.19);
           classroomGroup.add(dGroup);
+          registerCollider(seatCluster.x,seatCluster.z,1.76,1.28,0.12);
         });
 
         // Central gift & floral arrangement table
@@ -3504,7 +3510,9 @@
           new THREE.BoxGeometry(1.8, 0.74, 1.0),
           getProceduralPBRMaterial('wood', 0xb45309, 0.4)
         );
+        festiveClearance.reserve('central flower table',0,-0.2,1.8,1.0,0.10);
         centerTable.position.set(0, 0.37, -0.2);
+        addPrecisionEdge(centerTable,0x56361f,0.24);
         classroomGroup.add(centerTable);
         registerCollider(0,-0.2,1.8,1.0,0.16);
 
@@ -3527,7 +3535,11 @@
             shirtColor: stCfg.shirt,
             hasBouquet: stCfg.flower
           });
-          st.position.set(stCfg.x, 0, stCfg.z);
+          const spot=festiveClearance.find(
+            'festive student '+idx,stCfg.x,stCfg.z,0.58,0.58,0.13,1.15);
+          if(!spot)return;
+          st.position.set(spot.x,0,spot.z);
+          registerCollider(spot.x,spot.z,0.52,0.52,0.13);
           st.rotation.y = stCfg.rotY;
           st.traverse((c) => {
             if (c.isMesh) c.userData.interactiveType = 'talk_decor_student';
@@ -3589,6 +3601,9 @@
 
       buildRoomShell(classroomGroup, { width: 14, depth: 12, height: 3.8, exitType: 'exit_to_hallway1' });
       addTeacherPodiumAndFurniture(classroomGroup, currentBuildingSide === 'female' ? 0xdb2777 : 0x0284c7);
+      const clearance=createSceneClearancePlanner(14,12);
+      clearance.reserve('teacher platform',0,-4.65,3.2,1.85,0.06);
+      clearance.reserve('classroom door',0,5.15,2.4,0.75,0.04);
 
       const clockAndSlogan = createWallClockAndSlogan('TIẾT HỌC TRI ÂN CHÀO MỪNG 20/11', theme.signBg);
       clockAndSlogan.position.set(0, 3.18, -5.84);
@@ -3628,6 +3643,9 @@
       [-2.7, 2.7].forEach((dx, colIdx) => {
         [-1.8, 0.4, 2.4].forEach((dz, rowIdx) => {
           const deskAndChair = createStudentDeskAndChair(true, true);
+          // Seated bodies and chairs are an intentional assembly, so reserve
+          // a combined footprint instead of separating the components.
+          clearance.reserve('desk and seats',dx,dz+0.22,1.75,1.28,0.10);
           deskAndChair.position.set(dx, 0, dz);
           classroomGroup.add(deskAndChair);
           registerCollider(dx,dz+0.22,1.75,1.28,0.18);
@@ -3661,7 +3679,11 @@
           role: 'teacher',
           shirtColor: theme.teacherShirt
         });
-        room102Teacher.position.set(-2.3, 0.16, -4.4);
+        const teacherSpot=clearance.find('room102 teacher',-2.3,-4.4,0.58,0.58,0.12);
+        if(teacherSpot){
+          room102Teacher.position.set(teacherSpot.x,0.16,teacherSpot.z);
+          registerCollider(teacherSpot.x,teacherSpot.z,0.55,0.55,0.10);
+        }else room102Teacher.position.set(-2.3,0.16,-4.4);
         classroomGroup.add(room102Teacher);
         activeIdleCharacters.push({ mesh: room102Teacher, phase: 0.6 });
       }
