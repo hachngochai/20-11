@@ -5320,6 +5320,11 @@
             const desired=Math.atan2(dx,dz);
             const dyaw=((desired-roomHero.rotation.y+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
             roomHero.rotation.y+=dyaw*(1-Math.exp(-dt*8));
+            if (isFirstPersonPOV) {
+              // Keep the eye-level camera turning with the body on the landing.
+              const diff=((roomHero.rotation.y-fpYaw+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
+              fpYaw+=diff*(1-Math.exp(-dt*9));
+            }
           }
           animateHumanWalk(roomHero,elapsed,seg.name.startsWith('landing')?5:8.5,dt);
           const duration=a.steps.reduce((sum,v)=>sum+v.seconds,0);
