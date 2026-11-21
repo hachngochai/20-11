@@ -704,20 +704,32 @@
     // =========================================================================
     function configureLightingForMode(mode) {
       if (!hemiLight || !sunLight || !fillLight) return;
-      const isOutdoor = mode === 'intro' || mode === 'campus';
-      if (isOutdoor) {
-        hemiLight.intensity = 0.50;
-        sunLight.intensity = 0.88;
-        fillLight.intensity = 0.24;
-        if (scene) scene.fog = new THREE.FogExp2(0xdbeafe, graphicsUltra ? 0.0048 : 0.0031);
-        if (renderer) renderer.toneMappingExposure = 0.86;
+      const outdoor = mode === 'intro' || mode === 'campus';
+      if(outdoor) {
+        hemiLight.intensity=0.53;
+        sunLight.intensity=0.90;
+        fillLight.intensity=0.19;
+        scene.fog = new THREE.FogExp2(0xcbdde9,graphicsUltra?0.0045:0.0032);
+        renderer.toneMappingExposure=0.85;
       } else {
-        hemiLight.intensity = 0.46;
-        sunLight.intensity = 0.54;
-        fillLight.intensity = 0.22;
-        if (scene) scene.fog = new THREE.FogExp2(0xf8fafc, 0.0054);
-        if (renderer) renderer.toneMappingExposure = 0.90;
+        hemiLight.intensity=0.50;
+        sunLight.intensity=0.62;
+        fillLight.intensity=0.21;
+        scene.fog = new THREE.FogExp2(0xf1f5f9,0.0038);
+        renderer.toneMappingExposure=0.88;
       }
+      // Shadow texels are distributed where the user actually stands.
+      // The previous 72m-wide frustum made classroom edges visibly pixelated.
+      const extent=outdoor?44:17;
+      const sh=sunLight.shadow;
+      sh.camera.left=-extent;sh.camera.right=extent;
+      sh.camera.top=extent;sh.camera.bottom=-extent;
+      sh.camera.near=1;sh.camera.far=outdoor?125:82;
+      sh.camera.updateProjectionMatrix();
+      sh.normalBias=outdoor?0.015:0.010;
+      sh.bias=-0.00016;
+      sh.radius=graphicsUltra?2.1:1.4;
+      renderer.shadowMap.needsUpdate=true;
     }
 
     function createSkyDomeAndEnvMap() {
@@ -2307,17 +2319,39 @@
     }
 
     function applyGraphicsQuality() {
-      if(!renderer) return;
+      if(!renderer)return;
       const dpr=window.devicePixelRatio||1;
-      renderer.setPixelRatio(Math.min(dpr,graphicsUltra?1.8:1.05));
+      const mobile=Math.min(window.innerWidth,window.innerHeight)<680;
+      const target=graphicsUltra?(mobile?1.4:2.0):(mobile?1.0:1.15);
+      renderer.setPixelRatio(Math.min(dpr,target));
       renderer.shadowMap.enabled=true;
       renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-      if(sunLight){sunLight.shadow.radius=graphicsUltra?2.4:1.2;}
-      if(scene){scene.traverse(obj=>{
-        if(obj.userData && obj.userData.cinematicOnly) obj.visible=graphicsUltra;
-      });}
+      if(sunLight) {
+        const resolution=graphicsUltra?(mobile?2048:3072):1024;
+        const sh=sunLight.shadow;
+        if(sh.mapSize.x!==resolution){
+          sh.mapSize.set(resolution,resolution);
+          if(sh.map){sh.map.dispose();sh.map=null;}
+          renderer.shadowMap.needsUpdate=true;
+        }
+        sh.radius=graphicsUltra?2.1:1.4;
+      }
+      // Prefer sharper oblique floor textures, with a bounded GPU budget.
+      const maxAniso=renderer.capabilities?.getMaxAnisotropy?.()||4;
+      const factor=Math.min(maxAniso,graphicsUltra?12:4);
+      Object.values(TEXTURE_CACHE).forEach(tex=>{
+        if(tex?.isTexture && tex.anisotropy!==factor){
+          tex.anisotropy=factor;tex.needsUpdate=true;
+        }
+      });
+      if(scene)scene.traverse(obj=>{
+        if(obj.userData?.cinematicOnly)obj.visible=graphicsUltra;
+      });
       const btn=document.getElementById('btn-toggle-gfx');
-      if(btn) btn.title=graphicsUltra?'Cinematic: độ nét cao, ánh sáng và tiểu tiết':'Cao: tối ưu cho máy yếu';
+      if(btn)btn.title=graphicsUltra
+        ? 'Ultra: sắc nét hơn, bóng đổ chi tiết và vật liệu PBR'
+        : 'Tối ưu: độ phân giải và bóng đổ nhẹ cho thiết bị yếu';
+      if(sceneMode)configureLightingForMode(sceneMode);
     }
 
     function buildCampusScene() {
@@ -6316,7 +6350,7 @@
       scene = new THREE.Scene();
       clock = new THREE.Clock();
 
-      camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.15, 240);
+      camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.12, 240);
       camera.position.set(0, 12.5, 34);
 
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -6324,7 +6358,7 @@
       // Prevent browser touch-panning from competing with POV and on-board slide swipes.
       renderer.domElement.style.touchAction = 'none';
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.4));
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputEncoding = THREE.sRGBEncoding;
@@ -6347,9 +6381,9 @@
       sunLight.position.set(28, 42, 26);
       sunLight.castShadow = true;
       sunLight.shadow.mapSize.set(2048, 2048);
-      sunLight.shadow.bias = -0.0004;
-      sunLight.shadow.normalBias = 0.022;
-      sunLight.shadow.radius = 2.4;
+      sunLight.shadow.bias = -0.00016;
+      sunLight.shadow.normalBias = 0.014;
+      sunLight.shadow.radius = 2.1;
       sunLight.shadow.camera.near = 2;
       sunLight.shadow.camera.far = 130;
       const d = 36;
