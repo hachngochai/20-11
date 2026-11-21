@@ -768,13 +768,13 @@
         hemiLight.intensity=0.53;
         sunLight.intensity=0.90;
         fillLight.intensity=0.19;
-        scene.fog = new THREE.FogExp2(0xcbdde9,graphicsUltra?0.0045:0.0032);
+        scene.fog = new THREE.FogExp2(0xcbdde9,graphicsUltra?0.0027:0.0034);
         renderer.toneMappingExposure=0.85;
       } else {
         hemiLight.intensity=0.50;
         sunLight.intensity=0.62;
         fillLight.intensity=0.21;
-        scene.fog = new THREE.FogExp2(0xf1f5f9,0.0038);
+        scene.fog = new THREE.FogExp2(0xf1f5f9,0.0029);
         renderer.toneMappingExposure=0.88;
       }
       // Shadow texels are distributed where the user actually stands.
@@ -3936,7 +3936,7 @@
         room103Reader.position.set(readerSpot.x,0,readerSpot.z);
         registerCollider(readerSpot.x,readerSpot.z,0.62,0.58,0.15);
       } else room103Reader.position.set(0.3,0,-3.45);
-      room103Reader.rotation.y=Math.PI;
+      room103Reader.rotation.y=0;
       classroomGroup.add(room103Reader);
       room103ReaderBook=createHandheldReadingBook();
       room103ReaderBook.userData.keepWithEnhanced=true;
