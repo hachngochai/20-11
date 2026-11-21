@@ -250,31 +250,54 @@
     </div>
   </div>
 
-  <!-- Anthology Modal (Room 103) -->
-  <div id="anthology-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="modal-pop glass-panel rounded-3xl max-w-lg w-full p-5 sm:p-6 text-white border border-amber-400/40">
-      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
-        <span id="anthology-chapter" class="text-xs font-extrabold uppercase tracking-wider text-amber-300">Tập San Tri Ân 20/11</span>
-        <button id="btn-close-anthology" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
+  <!-- Room 103: full-screen open book with actual page flip, no flat text box. -->
+  <div id="anthology-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="Tập san tri ân">
+    <section class="anthology-viewer glass-panel rounded-3xl w-full max-w-5xl text-white p-3 sm:p-5">
+      <header class="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <div class="text-xs tracking-[0.16em] font-extrabold text-amber-300">GÓC TẬP SAN • PHÒNG 103</div>
+          <h2 id="anthology-chapter" class="text-sm sm:text-lg font-bold text-white mt-1">Tập san tri ân 20/11</h2>
+        </div>
+        <button id="btn-close-anthology" aria-label="Đóng tập san" class="rounded-full border border-white/20 bg-white/10 px-3 py-2 hover:bg-white/20">✕</button>
+      </header>
+      <nav id="anthology-book-tabs" aria-label="Chọn tập san" class="flex gap-2 mb-3 overflow-x-auto pb-1">
+        <button data-book="0" class="anthology-tab px-3 py-1.5 rounded-lg text-xs font-bold">Tập 1</button>
+        <button data-book="1" class="anthology-tab px-3 py-1.5 rounded-lg text-xs font-bold">Tập 2</button>
+        <button data-book="2" class="anthology-tab px-3 py-1.5 rounded-lg text-xs font-bold">Tập 3</button>
+        <button data-book="3" class="anthology-tab px-3 py-1.5 rounded-lg text-xs font-bold">Tập 4</button>
+        <button data-book="4" class="anthology-tab px-3 py-1.5 rounded-lg text-xs font-bold">Tập 5</button>
+      </nav>
+      <div id="anthology-book-shell" class="anthology-book-shell" title="Vuốt trái/phải để lật trang" tabindex="0" aria-label="Trang sách; dùng phím mũi tên trái hoặc phải">
+        <section class="anthology-paper anthology-paper-left">
+          <div class="anthology-paper-top">TRI ÂN NHÀ GIÁO • 20/11</div>
+          <div class="anthology-flourish">❦</div>
+          <h3 id="anthology-title" class="anthology-page-title">Tập san tri ân</h3>
+          <p id="anthology-body" class="anthology-page-text"></p>
+          <div class="anthology-page-number" id="anthology-left-number">01</div>
+        </section>
+        <section class="anthology-paper anthology-paper-right">
+          <div class="anthology-paper-top">LỜI HỌC TRÒ GỬI THẦY CÔ</div>
+          <div class="anthology-ink-decoration">✦</div>
+          <p id="anthology-right-body" class="anthology-page-text"></p>
+          <p id="anthology-author" class="anthology-page-author"></p>
+          <div class="anthology-page-number" id="anthology-right-number">02</div>
+        </section>
+        <div id="anthology-turn-sheet" class="anthology-turn-sheet" aria-hidden="true">
+          <div class="anthology-turn-front">
+            <div class="anthology-turn-paper-lines"></div>
+          </div>
+          <div class="anthology-turn-back">
+            <div class="anthology-turn-paper-lines"></div>
+          </div>
+        </div>
       </div>
-      <div id="anthology-book-tabs" class="flex flex-wrap gap-1.5 mb-3">
-        <button data-book="0" class="anthology-tab bg-amber-500 text-slate-950 px-2.5 py-1 rounded-xl text-[11px] font-extrabold transition">📖 Tập San 1</button>
-        <button data-book="1" class="anthology-tab bg-white/10 hover:bg-white/20 text-amber-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📕 Tập San 2</button>
-        <button data-book="2" class="anthology-tab bg-white/10 hover:bg-white/20 text-sky-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📘 Tập San 3</button>
-        <button data-book="3" class="anthology-tab bg-white/10 hover:bg-white/20 text-emerald-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📗 Tập San 4</button>
-        <button data-book="4" class="anthology-tab bg-white/10 hover:bg-white/20 text-purple-200 px-2.5 py-1 rounded-xl text-[11px] font-bold transition">📙 Tập San 5</button>
-      </div>
-      <div class="bg-amber-50/10 rounded-2xl p-4 border border-amber-300/20">
-        <h3 id="anthology-title" class="text-base font-extrabold text-amber-200 mb-2"></h3>
-        <p id="anthology-body" class="text-xs sm:text-sm text-slate-100 whitespace-pre-line leading-relaxed"></p>
-        <div id="anthology-author" class="text-right text-xs font-bold text-amber-300 mt-3"></div>
-      </div>
-      <div class="flex items-center justify-between mt-4">
-        <button id="btn-prev-anthology" class="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-xs font-bold">← Trang Trước</button>
-        <span id="anthology-counter" class="text-xs font-bold text-slate-300">1 / 3</span>
-        <button id="btn-next-anthology" class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold">Trang Sau →</button>
-      </div>
-    </div>
+      <footer class="flex items-center justify-between gap-3 pt-4">
+        <button id="btn-prev-anthology" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm font-semibold">← Trang trước</button>
+        <span id="anthology-counter" class="text-xs sm:text-sm text-amber-200 font-semibold text-center">1 / 3</span>
+        <button id="btn-next-anthology" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-bold">Trang sau →</button>
+      </footer>
+      <p class="text-center text-white/60 text-[11px] mt-2">Vuốt trên trang sách hoặc dùng phím ← → để lật trang.</p>
+    </section>
   </div>
 
   <!-- Photo Zoom Modal (Room 301) -->
