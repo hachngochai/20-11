@@ -696,17 +696,17 @@
       if (!hemiLight || !sunLight || !fillLight) return;
       const isOutdoor = mode === 'intro' || mode === 'campus';
       if (isOutdoor) {
-        hemiLight.intensity = 0.68;
-        sunLight.intensity = 1.24;
-        fillLight.intensity = 0.34;
-        if (scene) scene.fog = new THREE.FogExp2(0xdbeafe, graphicsUltra ? 0.0042 : 0.0025);
-        if (renderer) renderer.toneMappingExposure = 0.98;
+        hemiLight.intensity = 0.50;
+        sunLight.intensity = 0.88;
+        fillLight.intensity = 0.24;
+        if (scene) scene.fog = new THREE.FogExp2(0xdbeafe, graphicsUltra ? 0.0048 : 0.0031);
+        if (renderer) renderer.toneMappingExposure = 0.86;
       } else {
-        hemiLight.intensity = 0.64;
-        sunLight.intensity = 0.78;
-        fillLight.intensity = 0.34;
-        if (scene) scene.fog = new THREE.FogExp2(0xf8fafc, 0.006);
-        if (renderer) renderer.toneMappingExposure = 1.02;
+        hemiLight.intensity = 0.46;
+        sunLight.intensity = 0.54;
+        fillLight.intensity = 0.22;
+        if (scene) scene.fog = new THREE.FogExp2(0xf8fafc, 0.0054);
+        if (renderer) renderer.toneMappingExposure = 0.90;
       }
     }
 
@@ -1332,7 +1332,7 @@
         roughness: 0.12,
         metalness: 0.04,
         clearcoat: 0.9,
-        envMapIntensity: 1.25,
+        envMapIntensity: 0.65,
         transparent: true,
         opacity: 0.24,
         depthWrite: false
@@ -1436,12 +1436,16 @@
 
       const root = new THREE.Group();
       root.add(createContactShadow(0.32, 0.32, 0.34));
-      const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.44, metalness: 0.03 });
-      const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.48, metalness: 0.04 });
-      const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.62 });
-      const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.58, metalness: 0.08 });
-      const shoeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.35, metalness: 0.15 });
-      const soleMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45 });
+      const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.62, metalness: 0.0 });
+      const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.66, metalness: 0.02 });
+      const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.76, metalness: 0.01 });
+      const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.72, metalness: 0.02 });
+      const shoeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.50, metalness: 0.08 });
+      const soleMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.58 });
+      const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.18, metalness: 0 });
+      const irisMat = new THREE.MeshStandardMaterial({ color: 0x241c16, roughness: 0.40, metalness: 0 });
+      const lipMat = new THREE.MeshStandardMaterial({ color: 0xbe123c, roughness: 0.52, metalness: 0 });
+      const eyelidMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.72, metalness: 0 });
 
       const hipY = isSeated ? 0.52 : 0.85;
 
@@ -1455,13 +1459,20 @@
         new THREE.CylinderGeometry(gender === 'female' ? 0.158 : 0.172, 0.138, 0.46, 20),
         shirtMat
       );
-      torso.scale.set(1.08, 1, 0.82);
+      torso.scale.set(1.06, 1, 0.80);
       torso.position.y = hipY + 0.3;
       torso.castShadow = true;
       root.add(torso);
 
+      [-1, 1].forEach(side => {
+        const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.072, 14, 10), shirtMat);
+        shoulder.scale.set(0.95, 0.78, 0.82);
+        shoulder.position.set(side * 0.17, hipY + 0.475, 0);
+        root.add(shoulder);
+      });
+
       const chestCap = new THREE.Mesh(new THREE.SphereGeometry(0.165, 18, 12), shirtMat);
-      chestCap.scale.set(1.12, 0.42, 0.82);
+      chestCap.scale.set(1.08, 0.38, 0.80);
       chestCap.position.y = hipY + 0.5;
       root.add(chestCap);
 
@@ -1491,31 +1502,36 @@
         root.add(tie);
       }
 
-      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.062, 0.11, 16), skinMat);
-      neck.position.y = hipY + 0.56;
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.058, 0.12, 16), skinMat);
+      neck.position.y = hipY + 0.565;
       root.add(neck);
 
       const headGroup = new THREE.Group();
-      headGroup.position.y = hipY + 0.725;
+      headGroup.position.y = hipY + 0.715;
       root.add(headGroup);
 
       const head = new THREE.Mesh(new THREE.SphereGeometry(0.152, 24, 24), skinMat);
-      head.scale.set(0.93, 1.06, 0.96);
+      head.scale.set(0.9, 1.04, 0.92);
       head.castShadow = true;
       headGroup.add(head);
 
       [-0.05, 0.05].forEach((ex) => {
-        const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.017, 12, 12), new THREE.MeshBasicMaterial({ color: 0xfafafa }));
-        eyeWhite.scale.set(1.15, 0.67, 0.65);
-        eyeWhite.position.set(ex, 0.018, 0.14);
+        const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.0155, 14, 14), eyeWhiteMat);
+        eyeWhite.scale.set(1.1, 0.62, 0.6);
+        eyeWhite.position.set(ex, 0.016, 0.136);
         headGroup.add(eyeWhite);
 
-        const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0105, 10, 10), new THREE.MeshBasicMaterial({ color: 0x1e1b18 }));
-        iris.position.set(ex, 0.018, 0.153);
+        const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0092, 12, 12), irisMat);
+        iris.position.set(ex, 0.016, 0.147);
         headGroup.add(iris);
 
-        const catchlight = new THREE.Mesh(new THREE.SphereGeometry(0.005, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-        catchlight.position.set(ex + 0.005, 0.023, 0.16);
+        const upperLid = new THREE.Mesh(new THREE.BoxGeometry(0.031, 0.007, 0.016), eyelidMat);
+        upperLid.position.set(ex, 0.028, 0.138);
+        upperLid.rotation.z = ex * -0.4;
+        headGroup.add(upperLid);
+
+        const catchlight = new THREE.Mesh(new THREE.SphereGeometry(0.0036, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        catchlight.position.set(ex + 0.003, 0.021, 0.152);
         headGroup.add(catchlight);
       });
 
@@ -1530,29 +1546,47 @@
         brow.rotation.z=side*.065;
         headGroup.add(brow);
       });
-      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.022,12,10),skinMat);
-      nose.scale.set(0.56,0.7,1.05);
-      nose.position.set(0,-0.012,0.152);
+      const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.136, 20, 16), skinMat);
+      jaw.scale.set(0.95, 0.52, 0.84);
+      jaw.position.set(0, -0.088, 0.01);
+      headGroup.add(jaw);
+
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.021, 12, 10), skinMat);
+      nose.scale.set(0.5, 0.68, 0.98);
+      nose.position.set(0, -0.008, 0.148);
       headGroup.add(nose);
-      const smile = new THREE.Mesh(
-        new THREE.TorusGeometry(0.026, 0.0044, 8, 16, Math.PI),
-        new THREE.MeshBasicMaterial({ color: 0xbe123c })
-      );
+      const smile = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.0038, 8, 16, Math.PI), lipMat);
       smile.rotation.x = Math.PI;
-      smile.position.set(0, -0.042, 0.142);
+      smile.position.set(0, -0.05, 0.136);
       headGroup.add(smile);
 
+      const chin = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), skinMat);
+      chin.scale.set(0.8, 0.58, 0.7);
+      chin.position.set(0, -0.082, 0.115);
+      headGroup.add(chin);
+
       const hairCap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.162, 20, 20, 0, Math.PI * 2, 0, Math.PI * 0.64),
-        hairMat
+        new THREE.SphereGeometry(0.166, 24, 24, 0, Math.PI * 2, 0, Math.PI * 0.67), hairMat
       );
-      hairCap.position.set(0, 0.016, -0.006);
+      hairCap.position.set(0, 0.018, -0.008);
       headGroup.add(hairCap);
 
+      const fringe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.038, 0.04), hairMat);
+      fringe.position.set(0, 0.082, 0.115);
+      fringe.rotation.x = -0.16;
+      headGroup.add(fringe);
+
       if (gender === 'female') {
-        const backHair = new THREE.Mesh(new THREE.CylinderGeometry(0.142, 0.165, 0.32, 16), hairMat);
-        backHair.position.set(0, -0.08, -0.055);
+        const backHair = new THREE.Mesh(new THREE.CylinderGeometry(0.142, 0.17, 0.34, 18), hairMat);
+        backHair.position.set(0, -0.085, -0.055);
         headGroup.add(backHair);
+        [-1, 1].forEach(side => {
+          const sideLock = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.018, 0.18, 10), hairMat);
+          sideLock.position.set(side * 0.105, -0.01, 0.085);
+          sideLock.rotation.z = side * 0.16;
+          sideLock.rotation.x = 0.2;
+          headGroup.add(sideLock);
+        });
 
         const hairRibbon = new THREE.Mesh(
           new THREE.BoxGeometry(0.055, 0.028, 0.022),
@@ -1567,7 +1601,7 @@
         const shoulderPivot = new THREE.Group();
         shoulderPivot.position.set(side * 0.205, hipY + 0.48, 0);
 
-        const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.042, 0.22, 12), shirtMat);
+        const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.044, 0.22, 14), shirtMat);
         upperArm.position.y = -0.11;
         shoulderPivot.add(upperArm);
 
@@ -1575,7 +1609,7 @@
         lowerPivot.position.y = -0.22;
         shoulderPivot.add(lowerPivot);
 
-        const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.039, 0.033, 0.21, 12), skinMat);
+        const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.032, 0.21, 14), skinMat);
         forearm.position.y = -0.1;
         lowerPivot.add(forearm);
 
@@ -1602,7 +1636,7 @@
         const hipPivot = new THREE.Group();
         hipPivot.position.set(side * 0.084, hipY - 0.04, 0);
 
-        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.064, 0.054, 0.36, 14), pantsMat);
+        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.067, 0.056, 0.36, 16), pantsMat);
         thigh.position.y = -0.18;
         thigh.castShadow = true;
         hipPivot.add(thigh);
@@ -1611,7 +1645,7 @@
         lowerPivot.position.y = -0.36;
         hipPivot.add(lowerPivot);
 
-        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.051, 0.042, 0.36, 14), pantsMat);
+        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.36, 16), pantsMat);
         shin.position.y = -0.18;
         shin.castShadow = true;
         lowerPivot.add(shin);
@@ -1689,7 +1723,7 @@
 
       const headlightLens = new THREE.Mesh(
         new THREE.SphereGeometry(0.112, 14, 14),
-        new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfef08a, emissiveIntensity: 0.35 })
+        new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfef08a, emissiveIntensity: 0.14 })
       );
       headlightLens.position.set(0, 1.03, -0.62);
       group.add(headlightLens);
@@ -1864,8 +1898,8 @@
       const glassMat = new THREE.MeshPhysicalMaterial({
         color: 0xbae6fd,
         emissive: isFemale ? 0xfce7f3 : 0xe0f2fe,
-        emissiveIntensity: 0.22,
-        roughness: 0.06,
+        emissiveIntensity: 0.08,
+        roughness: 0.08,
         metalness: 0.18,
         clearcoat: 0.85,
         transparent: true,
@@ -2192,8 +2226,8 @@
       const lampGlobeMat = new THREE.MeshStandardMaterial({
         color: 0xfef9c3,
         emissive: 0xfde047,
-        emissiveIntensity: 0.45,
-        roughness: 0.2
+        emissiveIntensity: 0.18,
+        roughness: 0.28
       });
       [[-4.2, 19], [4.2, 19], [-4.2, 7], [4.2, 7], [-4.2, -5], [4.2, -5]].forEach(([lx, lz]) => {
         const lamp = new THREE.Group();
@@ -2291,7 +2325,7 @@
         const lanternX = px + (idx === 0 ? 0.95 : -0.95);
         const lantern = new THREE.Mesh(
           new THREE.CylinderGeometry(0.26, 0.26, 0.52, 8),
-          new THREE.MeshStandardMaterial({ color: 0xdc2626, emissive: 0xf59e0b, emissiveIntensity: 0.45 })
+          new THREE.MeshStandardMaterial({ color: 0xdc2626, emissive: 0xf59e0b, emissiveIntensity: 0.18 })
         );
         lantern.position.set(lanternX, 5.25, 0);
         gateGroup.add(lantern);
@@ -5730,7 +5764,7 @@
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputEncoding = THREE.sRGBEncoding;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.04;
+      renderer.toneMappingExposure = 0.92;
       container.appendChild(renderer.domElement);
       scene.add(camera);
       buildPOVViewmodel();
