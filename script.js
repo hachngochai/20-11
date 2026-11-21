@@ -252,6 +252,9 @@
     let room101SeatedStudents = [];
     let room102Teacher = null;
     let room102SlideMesh = null;
+    let room102SlideState = null;
+    let room102SlidePointer = null;
+    let slideIgnoreClickUntil = 0;
     let currentSlideIdx = 0;
     let currentAnthologyBookIdx = 0;
     let currentAnthologyPageIdx = 0;
@@ -3474,28 +3477,15 @@
       projBody.position.set(0, 3.22, -1.8);
       classroomGroup.add(projRod, projBody);
 
-      const slideTex = makeCanvasTexture('slide_page_0', 1024, 512, (ctx, w, h) => {
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(0, 0, w, h);
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 12;
-        ctx.strokeRect(12, 12, w - 24, h - 24);
-        ctx.fillStyle = '#fde047';
-        ctx.font = '800 38px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(SLIDE_PAGES[0].title, w / 2, 160);
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = '500 26px Inter, sans-serif';
-        ctx.fillText('Nhấn vào màn chiếu hoặc dùng nút bên dưới để chuyển slide 20/11', w / 2, 270);
-      });
-
+      // Slides are directly touchable on the classroom board (no modal).
       room102SlideMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(5.0, 2.25, 0.1),
-        new THREE.MeshBasicMaterial({ map: slideTex })
+        new THREE.BoxGeometry(5.0, 2.25, 0.09),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false })
       );
       room102SlideMesh.position.set(0.45, 1.95, -5.8);
-      room102SlideMesh.userData = { interactiveType: 'open_slide_modal' };
+      room102SlideMesh.userData.interactiveType = 'room102_slide_touch';
       classroomGroup.add(room102SlideMesh);
+      initRoom102Slides();
 
       const magSign = createSignBoard('BÁO TƯỜNG TRI ÂN 20/11', '#881337', '#fda4af', '#fff1f2', 2.4, 1.55);
       magSign.position.set(-4.35, 1.95, -5.78);
@@ -4646,7 +4636,6 @@
         buildRoom102();
         updateHeaderStatus(`${theme.shortName} • Phòng 102`);
         const list = [
-          { label: '📽️ Mở Slide Bài Giảng', onClick: () => openSlideModal(currentSlideIdx) },
           { label: '📰 Đọc Báo Tường', onClick: () => document.getElementById('magazine-modal').classList.remove('hidden') },
           { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway', -4.6) }
         ];
@@ -5030,34 +5019,115 @@
       room101BoardMesh.material.needsUpdate = true;
     }
 
-    function openSlideModal(idx) {
-      currentSlideIdx = ((idx % SLIDE_PAGES.length) + SLIDE_PAGES.length) % SLIDE_PAGES.length;
-      const slide = SLIDE_PAGES[currentSlideIdx];
-      document.getElementById('slide-modal-title').textContent = slide.title;
-      document.getElementById('slide-modal-body').textContent = slide.body;
-      document.getElementById('slide-modal-counter').textContent = `${currentSlideIdx + 1} / ${SLIDE_PAGES.length}`;
-      document.getElementById('slide-modal').classList.remove('hidden');
+    // In-world room 102 slide deck: render only into a reusable CanvasTexture.
+    function slideWrapLines(ctx, text, maxWidth, maxLines) {
+      const words = String(text || '').trim().split(/\s+/);
+      const lines = [];
+      let line = '';
+      for (const word of words) {
+        const candidate = line ? line + ' ' + word : word;
+        if (line && ctx.measureText(candidate).width > maxWidth) {
+          lines.push(line); line = word;
+          if (lines.length >= maxLines-1) break;
+        } else line = candidate;
+      }
+      if (line) lines.push(line);
+      return lines;
+    }
 
-      if (room102SlideMesh) {
-        const tex = makeCanvasTexture(`slide_page_${currentSlideIdx}`, 1024, 512, (ctx, w, h) => {
-          ctx.fillStyle = '#0f172a';
-          ctx.fillRect(0, 0, w, h);
-          ctx.strokeStyle = '#f59e0b';
-          ctx.lineWidth = 12;
-          ctx.strokeRect(12, 12, w - 24, h - 24);
-          ctx.fillStyle = '#fde047';
-          ctx.font = '800 34px Inter, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(slide.title, w / 2, 150, w - 80);
-          ctx.fillStyle = '#f8fafc';
-          ctx.font = '500 24px Inter, sans-serif';
-          ctx.fillText(slide.body.slice(0, 62), w / 2, 250, w - 90);
-          if (slide.body.length > 62) {
-            ctx.fillText(slide.body.slice(62, 128), w / 2, 295, w - 90);
-          }
-        });
-        room102SlideMesh.material.map = tex;
-        room102SlideMesh.material.needsUpdate = true;
+    function createRoom102PageCanvas(index) {
+      const page=SLIDE_PAGES[index], canvas=document.createElement('canvas');
+      const W=1280,H=576;
+      canvas.width=W;canvas.height=H;
+      const ctx=canvas.getContext('2d');
+      const palette=[
+        ['#0b1930','#173d64','#fbbf24'],
+        ['#071f2a','#115e68','#67e8f9'],
+        ['#21152e','#623a77','#f9a8d4'],
+        ['#0b2522','#145745','#86efac']
+      ][index%4];
+      const grad=ctx.createLinearGradient(0,0,W,H);
+      grad.addColorStop(0,palette[0]);grad.addColorStop(1,palette[1]);
+      ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+      ctx.strokeStyle='rgba(255,255,255,0.06)';
+      ctx.lineWidth=2;
+      for(let k=0;k<7;k++){ctx.beginPath();ctx.arc(W-120,k*82-50,130+k*20,0,Math.PI*2);ctx.stroke();}
+      ctx.fillStyle=palette[2];
+      ctx.fillRect(0,0,12,H);ctx.fillRect(92,99,100,5);
+      ctx.textAlign='left';ctx.font='700 22px Inter,Arial,sans-serif';
+      ctx.fillText('BÀI GIẢNG  •  TRI ÂN 20/11',94,70);
+      ctx.fillStyle='#fff';ctx.font='800 39px Inter,Arial,sans-serif';
+      const titles=slideWrapLines(ctx,page.title,W-210,3);
+      titles.forEach((line,i)=>ctx.fillText(line,94,161+i*51));
+      const y=205+Math.max(0,titles.length-1)*50;
+      ctx.fillStyle='rgba(241,245,249,0.98)';
+      ctx.font='500 28px Inter,Arial,sans-serif';
+      slideWrapLines(ctx,page.body,W-225,4).forEach((line,i)=>ctx.fillText(line,94,y+i*41));
+      ctx.strokeStyle='rgba(255,255,255,0.18)';
+      ctx.beginPath();ctx.moveTo(95,480);ctx.lineTo(W-95,480);ctx.stroke();
+      ctx.fillStyle='rgba(226,232,240,0.85)';ctx.font='600 19px Inter,Arial,sans-serif';
+      ctx.fillText('VUỐT TRÁI / PHẢI HOẶC CHẠM ĐỂ ĐỔI SLIDE',95,520);
+      ctx.textAlign='right';ctx.font='800 22px Inter,Arial,sans-serif';
+      ctx.fillStyle='#fff';
+      ctx.fillText(String(index+1).padStart(2,'0')+' / '+String(SLIDE_PAGES.length).padStart(2,'0'),W-95,520);
+      ctx.textAlign='center';ctx.font='48px Arial,sans-serif';
+      ctx.fillStyle='rgba(255,255,255,0.60)';
+      ctx.fillText('‹',42,305);ctx.fillText('›',W-42,305);
+      return canvas;
+    }
+
+    function initRoom102Slides() {
+      if (room102SlideState?.texture) room102SlideState.texture.dispose();
+      if (!room102SlideMesh) return;
+      const canvas=document.createElement('canvas');
+      canvas.width=1280;canvas.height=576;
+      const texture=new THREE.CanvasTexture(canvas);
+      texture.encoding=THREE.sRGBEncoding;
+      texture.minFilter=THREE.LinearFilter;
+      texture.magFilter=THREE.LinearFilter;
+      room102SlideMesh.material.map=texture;
+      room102SlideMesh.material.needsUpdate=true;
+      currentSlideIdx=0;
+      room102SlideState={
+        canvas,ctx:canvas.getContext('2d'),texture,
+        pages:SLIDE_PAGES.map((_,i)=>createRoom102PageCanvas(i)),
+        motion:null
+      };
+      paintRoom102Slide(0);
+    }
+
+    function paintRoom102Slide(offset) {
+      const v=room102SlideState;
+      if (!v) return;
+      const W=v.canvas.width,H=v.canvas.height;
+      const t=THREE.MathUtils.clamp(offset,-1,1);
+      v.ctx.clearRect(0,0,W,H);
+      v.ctx.fillStyle='#0b1930';v.ctx.fillRect(0,0,W,H);
+      v.ctx.drawImage(v.pages[currentSlideIdx],Math.round(t*W),0,W,H);
+      if(Math.abs(t)>0.001){
+        const other=(currentSlideIdx+(t<0?1:-1)+SLIDE_PAGES.length)%SLIDE_PAGES.length;
+        v.ctx.drawImage(v.pages[other],Math.round((t+(t<0?1:-1))*W),0,W,H);
+      }
+      v.texture.needsUpdate=true;
+    }
+
+    function changeRoom102Slide(direction, from=0) {
+      if(sceneMode!=='room102'||!room102SlideState||room102SlideState.motion)return;
+      const d=Math.sign(direction);
+      room102SlideState.motion={direction:d,from,to:d===0?0:-d,elapsed:0,duration:d?0.32:0.20};
+    }
+
+    function updateRoom102SlideAnimation(dt) {
+      const v=room102SlideState;
+      if(sceneMode!=='room102'||!v||!v.motion||room102SlidePointer) return;
+      const m=v.motion;
+      m.elapsed=Math.min(m.duration,m.elapsed+dt);
+      const t=smooth01(m.elapsed/m.duration);
+      paintRoom102Slide(THREE.MathUtils.lerp(m.from,m.to,t));
+      if(t>=1){
+        if(m.direction) currentSlideIdx=(currentSlideIdx+m.direction+SLIDE_PAGES.length)%SLIDE_PAGES.length;
+        v.motion=null;
+        paintRoom102Slide(0);
       }
     }
 
@@ -5466,7 +5536,10 @@
 
       // Accelerated, frame-rate-independent player movement and collisions.
       if (roomHero && sceneMode !== 'intro' && sceneMode !== 'campus') {
-        const canControl = !activeTransition() && !document.querySelector('.fixed.inset-0.z-50:not(.hidden)');
+        // First-person: W/A/S/D and arrows move relative to the viewer's yaw.
+        // Shift increases walking speed, with the same axis-separated collisions.
+        const canControl = !activeTransition() && !room102SlidePointer &&
+          !document.querySelector('.fixed.inset-0.z-50:not(.hidden)');
         let ax=0,az=0;
         if(canControl){
           if(keysPressed.KeyW || keysPressed.ArrowUp) az+=1;
@@ -5478,9 +5551,11 @@
         if(length>0){ax/=length;az/=length;}
         const desiredX = isFirstPersonPOV ? Math.sin(fpYaw)*az + Math.cos(fpYaw)*ax : ax;
         const desiredZ = isFirstPersonPOV ? Math.cos(fpYaw)*az - Math.sin(fpYaw)*ax : -az;
+        const running = isFirstPersonPOV && (keysPressed.ShiftLeft || keysPressed.ShiftRight);
+        const topSpeed = running ? 3.70 : isFirstPersonPOV ? 2.60 : 2.65;
         const accel = 1-Math.exp(-dt * (length ? 11 : 13));
-        heroVelocity.x=THREE.MathUtils.lerp(heroVelocity.x,desiredX*2.65,accel);
-        heroVelocity.z=THREE.MathUtils.lerp(heroVelocity.z,desiredZ*2.65,accel);
+        heroVelocity.x=THREE.MathUtils.lerp(heroVelocity.x,desiredX*topSpeed,accel);
+        heroVelocity.z=THREE.MathUtils.lerp(heroVelocity.z,desiredZ*topSpeed,accel);
         if(!canControl) heroVelocity.multiplyScalar(Math.exp(-dt*25));
         const xx=roomHero.position.x+heroVelocity.x*dt;
         const zz=roomHero.position.z+heroVelocity.z*dt;
@@ -5495,7 +5570,7 @@
           let delta=((desiredYaw-roomHero.rotation.y+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
           roomHero.rotation.y += delta*(1-Math.exp(-dt*12));
         }
-        if(!activeTransition()) animateHumanWalk(roomHero,elapsed,speed>0.07?8:0,dt,speed/2.65);
+        if(!activeTransition()) animateHumanWalk(roomHero,elapsed,speed>0.07?8:0,dt,speed/(running?3.70:isFirstPersonPOV?2.60:2.65));
       }
 
       ceilingFans.forEach((fan) => {
@@ -5553,6 +5628,7 @@
         controls.update();
       }
 
+      updateRoom102SlideAnimation(dt);
       updateEnhancedHumanoids(dt);
       updatePOVViewmodel(elapsed);
       renderer.render(scene, camera);
@@ -5571,11 +5647,38 @@
       window.addEventListener('keydown', (e) => {
         const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'') || document.activeElement?.isContentEditable;
         if(typing) return;
-        if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+        if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code) ||
+          (isFirstPersonPOV && !e.ctrlKey && !e.metaKey &&
+          ['KeyW','KeyA','KeyS','KeyD'].includes(e.code))) e.preventDefault();
         keysPressed[e.code] = true;
       });
       window.addEventListener('keyup', e => { keysPressed[e.code]=false; });
       window.addEventListener('blur',()=>{Object.keys(keysPressed).forEach(k=>keysPressed[k]=false);isPointerDragging=false;});
+
+      // Capture slide gestures BEFORE OrbitControls / first-person drag.
+      // Dragging a real 3D board never rotates the camera or opens a popup.
+      renderer.domElement.addEventListener('pointerdown', (e) => {
+        if (sceneMode !== 'room102' || !room102SlideMesh || activeTransition() ||
+            room102SlideState?.motion || (e.pointerType === 'mouse' && e.button !== 0)) return;
+        const rect=renderer.domElement.getBoundingClientRect();
+        const p=new THREE.Vector2(
+          ((e.clientX-rect.left)/rect.width)*2-1,
+          -((e.clientY-rect.top)/rect.height)*2+1
+        );
+        const rc=new THREE.Raycaster();
+        rc.setFromCamera(p,camera);
+        const hit=rc.intersectObject(room102SlideMesh,false)[0];
+        if(!hit) return;
+        room102SlidePointer={
+          id:e.pointerId,x:e.clientX,deltaX:0,uv:hit.uv?.x ?? 0.5,
+          originalOrbitEnabled:controls.enabled
+        };
+        if(!isFirstPersonPOV) controls.enabled=false;
+        isPointerDragging=false;
+        renderer.domElement.setPointerCapture?.(e.pointerId);
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }, {capture:true});
 
       // 360-degree look-around when First-Person POV is active
       renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -5585,6 +5688,16 @@
         if (isFirstPersonPOV) renderer.domElement.setPointerCapture?.(e.pointerId);
       });
       window.addEventListener('pointermove', (e) => {
+        if(room102SlidePointer){
+          if(e.pointerId!==room102SlidePointer.id) return;
+          const dx=e.clientX-room102SlidePointer.x;
+          room102SlidePointer.deltaX=dx;
+          const width=Math.max(170,Math.min(450,renderer.domElement.clientWidth*0.42));
+          room102SlidePointer.offset=THREE.MathUtils.clamp(dx/width,-0.94,0.94);
+          paintRoom102Slide(room102SlidePointer.offset);
+          e.preventDefault();
+          return;
+        }
         if (!isPointerDragging) return;
         const dx = e.clientX - lastPointerX;
         const dy = e.clientY - lastPointerY;
@@ -5595,8 +5708,33 @@
           fpPitch = THREE.MathUtils.clamp(fpPitch - dy * 0.0035, -0.75, 0.75);
         }
       });
-      window.addEventListener('pointerup', () => {
-        isPointerDragging = false;
+      window.addEventListener('pointerup', (e) => {
+        const gesture=room102SlidePointer;
+        if(gesture && e.pointerId===gesture.id){
+          room102SlidePointer=null;
+          if(!isFirstPersonPOV) controls.enabled=gesture.originalOrbitEnabled;
+          const dx=gesture.deltaX||0;
+          const offset=gesture.offset||0;
+          if(Math.abs(offset)>0.19 || Math.abs(dx)>48){
+            changeRoom102Slide(dx<0?1:-1,offset);
+          } else if(Math.abs(dx)>13){
+            changeRoom102Slide(0,offset);
+          } else {
+            changeRoom102Slide(gesture.uv<0.33?-1:1,offset);
+          }
+          slideIgnoreClickUntil=performance.now()+500;
+          e.preventDefault();
+        }
+        isPointerDragging=false;
+      });
+      window.addEventListener('pointercancel', (e) => {
+        if(room102SlidePointer && room102SlidePointer.id===e.pointerId) {
+          const offset=room102SlidePointer.offset||0;
+          if(!isFirstPersonPOV) controls.enabled=room102SlidePointer.originalOrbitEnabled;
+          room102SlidePointer=null;
+          changeRoom102Slide(0,offset);
+        }
+        isPointerDragging=false;
       });
 
       const backBtn = document.getElementById('btn-back');
@@ -5627,14 +5765,22 @@
           cameraState.overviewScene=sceneMode;
         }
         isFirstPersonPOV=pov;
-        if(pov) { fpYaw=roomHero?.rotation.y ?? Math.PI; fpPitch=-0.04; }
+        if(pov) {
+          fpYaw=roomHero?.rotation.y ?? Math.PI;
+          fpPitch=-0.04;
+          renderer.domElement.tabIndex=0;
+          renderer.domElement.focus?.({preventScroll:true});
+        }
         applyInteriorCameraView(true);
         playChime(pov?540:660,0.13);
       }
       const btnOverview=document.getElementById('btn-camera-overview');
       const btnDonor=document.getElementById('btn-camera-donor');
       if(btnOverview) btnOverview.addEventListener('click',()=>chooseCamera(false));
-      if(btnDonor) btnDonor.addEventListener('click',()=>chooseCamera(true));
+      if(btnDonor) {
+        btnDonor.title='Góc người tặng hoa: W/A/S/D hoặc phím mũi tên để di chuyển; giữ Shift để chạy; kéo chuột để nhìn.';
+        btnDonor.addEventListener('click',()=>chooseCamera(true));
+      }
       const audioBtn=document.getElementById('btn-audio-toggle');
       if(audioBtn) audioBtn.addEventListener('click',()=>{
         audioEnabled=!audioEnabled;
@@ -5683,13 +5829,6 @@
         const el = document.getElementById(id);
         if (el) el.addEventListener('click', () => document.getElementById('magazine-modal').classList.add('hidden'));
       });
-
-      const closeSlide = document.getElementById('btn-close-slide');
-      if (closeSlide) closeSlide.addEventListener('click', () => document.getElementById('slide-modal').classList.add('hidden'));
-      const prevSlide = document.getElementById('btn-prev-slide');
-      if (prevSlide) prevSlide.addEventListener('click', () => openSlideModal(currentSlideIdx - 1));
-      const nextSlide = document.getElementById('btn-next-slide');
-      if (nextSlide) nextSlide.addEventListener('click', () => openSlideModal(currentSlideIdx + 1));
 
       ['btn-close-art', 'btn-ok-art'].forEach((id) => {
         const el = document.getElementById(id);
@@ -5947,6 +6086,7 @@
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
       renderer.domElement.addEventListener('click', (e) => {
+        if (performance.now()<slideIgnoreClickUntil) return;
         if (sceneMode === 'intro' || activeTransition()) return;
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -5978,7 +6118,7 @@
         else if (type === 'gift_teacher_301') triggerRoom301Gift();
         else if (type === 'talk_decor_student') triggerTalkDecorStudent();
         else if (type === 'chalkboard_wish') document.getElementById('chalkboard-modal').classList.remove('hidden');
-        else if (type === 'open_slide_modal') openSlideModal(currentSlideIdx);
+        else if (type === 'room102_slide_touch') changeRoom102Slide(1);
         else if (type === 'open_wall_newspaper') document.getElementById('magazine-modal').classList.remove('hidden');
         else if (type === 'view_artwork') openArtworkViewer(hits[0].object.userData.artIndex || 0);
         else if (type === 'open_anthology') openAnthologyModal(hits[0].object.userData.bookIndex || 0, 0);
