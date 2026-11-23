@@ -286,6 +286,10 @@
 
     let room201Performers = [];
     let room201Audience = [];
+    let room201Seats = [];
+    let room201SitAnim = null;
+    let room201SeatedSeat = null;
+    let room201ClapTimer = 0;
     let room202State = { waitingStudents: [], reporter: null, interviewee: null };
     let room301Teacher = null;
     let room302Trees = { left: null, right: null };
@@ -417,7 +421,7 @@
     }
 
     function activeTransition() {
-      return transitionLock || !!(campusDismountAnim || classroomWalkAnim || exitRoomWalkAnim || stairClimbAnim || hallwayEntryAnim || room101GiftAnim || room301GiftAnim || campusEnterBuildingAnim);
+      return transitionLock || !!(campusDismountAnim || classroomWalkAnim || exitRoomWalkAnim || stairClimbAnim || hallwayEntryAnim || room101GiftAnim || room301GiftAnim || campusEnterBuildingAnim || room201SitAnim);
     }
 
 
@@ -4756,6 +4760,10 @@
       room201Performers = [];
       room201Audience = [];
       pinkRoom201Teachers = [];
+      room201Seats = [];
+      room201SitAnim = null;
+      room201SeatedSeat = null;
+      room201ClapTimer = 0;
 
       if (currentBuildingSide === 'female') {
         buildRoomShell(auditoriumGroup, { width: 16, depth: 14, height: 4.2, exitType: 'exit_to_hallway2', floorType: 'wood', floorColor: 0x78350f });
@@ -4852,6 +4860,59 @@
           pinkRoom201Teachers.push({ mesh, phase: idx * 0.9 });
           activeIdleCharacters.push({ mesh, phase: idx * 0.9 });
         });
+
+        // Dedicated interactive student-representative guest chair at the left head of the conference table
+        const guestSeatX = -5.45, guestSeatZ = -0.80, guestRotY = Math.PI / 2;
+        const guestChair = new THREE.Group();
+        guestChair.position.set(guestSeatX, 0, guestSeatZ);
+        guestChair.rotation.y = guestRotY;
+        const guestVelvetMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.42, envMapIntensity: 0.30 });
+        const guestGoldMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.65, roughness: 0.30 });
+        const gSeatPad = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.08, 0.50), guestVelvetMat);
+        gSeatPad.position.set(0, 0.42, 0.04);
+        const gBackPad = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.62, 0.08), guestVelvetMat);
+        gBackPad.position.set(0, 0.76, -0.22);
+        const gGoldTrim = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.045, 0.095), guestGoldMat);
+        gGoldTrim.position.set(0, 1.08, -0.22);
+        const gStem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.38, 10), chairSteel);
+        gStem.position.set(0, 0.21, 0.02);
+        const gBase = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.05, 12), chairSteel);
+        gBase.position.set(0, 0.025, 0.02);
+        [-0.28, 0.28].forEach(ax => {
+          const arm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.36), guestVelvetMat);
+          arm.position.set(ax, 0.62, -0.02);
+          guestChair.add(arm);
+        });
+        guestChair.add(gSeatPad, gBackPad, gGoldTrim, gStem, gBase);
+        guestChair.traverse((m) => {
+          if (m.isMesh) {
+            m.castShadow = true;
+            m.receiveShadow = true;
+            m.userData.interactiveType = 'sit_room201_seat';
+            m.userData.seatIndex = 0;
+          }
+        });
+        auditoriumGroup.add(guestChair);
+        registerCollider(guestSeatX, guestSeatZ, 0.72, 0.72, 0.12);
+
+        // Meeting folder on the left end of the conference table for the student representative
+        const guestFolder = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.024, 0.34), folderMat);
+        guestFolder.position.set(-4.25, 0.86, -0.80);
+        auditoriumGroup.add(guestFolder);
+
+        room201Seats.push({
+          index: 0,
+          side: 'female',
+          x: guestSeatX + 0.04,
+          z: guestSeatZ,
+          rotY: guestRotY,
+          sitOffsetY: -0.34,
+          exitPoint: [guestSeatX, 0.55],
+          exitClearPoint: [guestSeatX, 2.45],
+          camPos: [-2.8, 2.40, 3.65],
+          camTarget: [-3.35, 1.05, -0.80],
+          label: 'Ghế Đại Diện Học Sinh'
+        });
       } else {
         buildRoomShell(auditoriumGroup, { width: 18, depth: 16, height: 4.8, exitType: 'exit_to_hallway2', floorType: 'wood', floorColor: 0x78350f });
 
@@ -4945,14 +5006,48 @@
 
         // Auditorium Theater Seats + Seated Teachers & Students + Colliders
         const theaterSeatMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.65, envMapIntensity: 0.2 });
+        const reservedSeatMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.52, envMapIntensity: 0.26 });
+        const reservedGoldMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.62, roughness: 0.32 });
         [-4.2, -1.4, 1.4, 4.2].forEach((ax, idx) => {
           [-1.2, 1.2, 3.4].forEach((az, rowIdx) => {
-            const seatBase = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.44, 0.55), theaterSeatMat);
+            const isHeroSeat = rowIdx === 2 && (idx === 1 || idx === 2);
+            const matForSeat = isHeroSeat ? reservedSeatMat : theaterSeatMat;
+            const seatBase = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.44, 0.55), matForSeat);
             seatBase.position.set(ax, 0.22, az + 0.08);
-            const seatBack = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.92, 0.14), theaterSeatMat);
+            const seatBack = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.92, 0.14), matForSeat);
             seatBack.position.set(ax, 0.46, az + 0.34);
+            seatBase.castShadow = true;
+            seatBase.receiveShadow = true;
+            seatBack.castShadow = true;
+            seatBack.receiveShadow = true;
             auditoriumGroup.add(seatBase, seatBack);
             registerCollider(ax, az + 0.16, 0.78, 0.76, 0.12);
+
+            if (isHeroSeat) {
+              const seatIdx = room201Seats.length;
+              const topTrim = new THREE.Mesh(new THREE.BoxGeometry(0.70, 0.055, 0.16), reservedGoldMat);
+              topTrim.position.set(ax, 0.94, az + 0.34);
+              const frontPiping = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.035, 0.04), reservedGoldMat);
+              frontPiping.position.set(ax, 0.445, az - 0.18);
+              auditoriumGroup.add(topTrim, frontPiping);
+              [seatBase, seatBack, topTrim, frontPiping].forEach((m) => {
+                m.userData.interactiveType = 'sit_room201_seat';
+                m.userData.seatIndex = seatIdx;
+              });
+              room201Seats.push({
+                index: seatIdx,
+                side: 'teacher',
+                x: ax,
+                z: az + 0.04,
+                rotY: Math.PI,
+                sitOffsetY: -0.35,
+                exitPoint: [ax, 2.50],
+                exitClearPoint: [0, 2.50],
+                camPos: [ax + (ax < 0 ? -2.25 : 2.25), 2.35, 5.45],
+                camTarget: [ax * 0.40, 1.15, 0.15],
+                label: seatIdx === 0 ? 'Ghế Hàng 3 (Trái)' : 'Ghế Hàng 3 (Phải)'
+              });
+            }
 
             if (rowIdx === 0) {
               const tAud = createRealisticHuman({
@@ -5914,6 +6009,11 @@
       transitionLock = false;
       campusEnterBuildingAnim = classroomWalkAnim = exitRoomWalkAnim = stairClimbAnim = hallwayEntryAnim = campusDismountAnim = null;
       room101GiftAnim = room301GiftAnim = null;
+      room201SitAnim = null;
+      room201SeatedSeat = null;
+      room201ClapTimer = 0;
+      room201Seats = [];
+      if (roomHero) roomHero.position.y = 0;
       room101BoardMesh = null;
       room101Teacher = null;
       room102Teacher = null;
@@ -6069,17 +6169,7 @@
       } else if (mode === 'room201') {
         buildRoom201();
         updateHeaderStatus(`${theme.shortName} • Phòng 201`);
-        if (currentBuildingSide === 'female') {
-          setClassroomControls([
-            { label: '🤝 Kính Chào Hội Đồng Giáo Viên', onClick: () => showSpeechCard('Hội Đồng Sư Phạm', 'Thay mặt Ban Giám Hiệu và toàn thể Thầy Cô (Thầy A, Cô B, Thầy C, Cô D), cảm ơn các em học sinh đã đến chung vui ngày Nhà giáo Việt Nam 20/11!') },
-            { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway2', -6.8) }
-          ]);
-        } else {
-          setClassroomControls([
-            { label: '👏 Cổ Vũ Văn Nghệ', onClick: () => { playChime(740, 0.22); showSpeechCard('Hội Trường 201', 'Tiết mục hát múa “Người Thầy Năm Xưa” nhận được tràng pháo tay vang dội từ Quý Thầy Cô và toàn thể học sinh!'); } },
-            { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway2', -6.8) }
-          ]);
-        }
+        updateRoom201HUDControls();
       } else if (mode === 'room202') {
         buildRoom202();
         updateHeaderStatus(`${theme.shortName} • Phòng 202`);
@@ -6208,6 +6298,10 @@
 
     function startExitRoomWalk(targetHallwayMode, exitDoorX) {
       if (activeTransition()) return;
+      if (room201SeatedSeat && sceneMode === 'room201') {
+        startStandFromRoom201(() => startExitRoomWalk(targetHallwayMode, exitDoorX), true);
+        return;
+      }
       lastExitedDoorX = Number.isFinite(exitDoorX) ? exitDoorX : (ROOM_DOOR_X[sceneMode] || -9.2);
       const exitPivots =
         classroomGroup.visible
@@ -6228,6 +6322,321 @@
         pivots: exitPivots
       };
       playChime(500, 0.14);
+    }
+
+    function updateRoom201HUDControls() {
+      if (sceneMode !== 'room201') return;
+      const seated = !!room201SeatedSeat;
+      if (currentBuildingSide === 'female') {
+        setClassroomControls([
+          {
+            label: seated ? '🧍 Đứng Dậy' : '🪑 Ngồi Ghế Dự Họp',
+            onClick: () => (seated ? startStandFromRoom201() : startSitRoom201(0))
+          },
+          {
+            label: '🤝 Kính Chào Hội Đồng Giáo Viên',
+            onClick: () => {
+              playChime(680, 0.18);
+              showSpeechCard('Hội Đồng Sư Phạm', 'Thay mặt Ban Giám Hiệu và toàn thể Thầy Cô (Thầy A, Cô B, Thầy C, Cô D), cảm ơn các em học sinh đã đến chung vui ngày Nhà giáo Việt Nam 20/11!');
+            }
+          },
+          { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway2', -6.8) }
+        ]);
+      } else {
+        setClassroomControls([
+          {
+            label: seated ? '🧍 Đứng Dậy' : '🪑 Ngồi Ghế Xem Văn Nghệ',
+            onClick: () => (seated ? startStandFromRoom201() : startSitRoom201(0))
+          },
+          { label: '👏 Cổ Vũ Văn Nghệ', onClick: () => triggerRoom201Cheer() },
+          { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway2', -6.8) }
+        ]);
+      }
+    }
+
+    function triggerRoom201Cheer() {
+      if (sceneMode !== 'room201') return;
+      room201ClapTimer = 2.8;
+      playChime(740, 0.22);
+      setTimeout(() => playChime(880, 0.18), 140);
+      spawnGiftBloomParticles(new THREE.Vector3(0, 1.35, -3.5), auditoriumGroup);
+      showSpeechCard('Hội Trường 201', 'Tiết mục hát múa “Người Thầy Năm Xưa” nhận được tràng pháo tay vang dội từ Quý Thầy Cô và toàn thể học sinh!');
+    }
+
+    function applyHeroSitPose(hero, t, sitOffsetY = -0.35) {
+      if (!hero || !hero.userData) return;
+      const u = smooth01(THREE.MathUtils.clamp(t, 0, 1));
+      const d = hero.userData;
+      hero.position.y = THREE.MathUtils.lerp(0, sitOffsetY, u);
+      [d.leftLeg, d.rightLeg].forEach((hip) => {
+        if (!hip) return;
+        hip.rotation.x = THREE.MathUtils.lerp(0, -1.46, u);
+        hip.rotation.y = 0;
+        hip.rotation.z = 0;
+        if (hip.userData?.lowerPivot) {
+          hip.userData.lowerPivot.rotation.x = THREE.MathUtils.lerp(0, 1.46, u);
+          hip.userData.lowerPivot.rotation.z = 0;
+        }
+      });
+      if (d.leftArm) {
+        d.leftArm.rotation.x = THREE.MathUtils.lerp(0, -0.62, u);
+        d.leftArm.rotation.z = THREE.MathUtils.lerp(0, -0.06, u);
+        if (d.leftArm.userData?.lowerPivot) {
+          d.leftArm.userData.lowerPivot.rotation.x = THREE.MathUtils.lerp(0, -0.52, u);
+        }
+      }
+      if (d.rightArm) {
+        d.rightArm.rotation.x = THREE.MathUtils.lerp(0, -0.58, u);
+        d.rightArm.rotation.z = THREE.MathUtils.lerp(0, 0.06, u);
+        if (d.rightArm.userData?.lowerPivot) {
+          d.rightArm.userData.lowerPivot.rotation.x = THREE.MathUtils.lerp(0, -0.55, u);
+        }
+      }
+    }
+
+    function buildRoom201SitWaypoints(seat) {
+      const sx = roomHero.position.x;
+      const sz = roomHero.position.z;
+      const pts = [[sx, sz]];
+      const pushPt = (x, z) => {
+        const prev = pts[pts.length - 1];
+        if (Math.hypot(x - prev[0], z - prev[1]) > 0.08) pts.push([x, z]);
+      };
+
+      if (seat.side === 'female') {
+        // Pink 201 boardroom: walk around the conference table to the open left end
+        if (sz < -3.1) {
+          pushPt(-5.45, Math.max(sz, -4.2));
+          pushPt(-5.45, -2.0);
+        } else {
+          if (sx > 4.6 && sz < 1.8) {
+            pushPt(Math.max(sx, 5.65), 2.35);
+          }
+          if (sz > 2.2) {
+            pushPt(-5.45, Math.min(sz, 3.3));
+          } else if (sx > -4.6) {
+            pushPt(sx, 2.35);
+            pushPt(-5.45, 2.35);
+          }
+          pushPt(-5.45, 0.55);
+        }
+        pushPt(seat.x, seat.z);
+      } else {
+        // Blue 201 auditorium: approach from the open front aisle (z = 2.50) so hero never clips seat backrests
+        if (sz > 4.2) {
+          if (Math.abs(sx) > 0.65) pushPt(0, Math.min(sz, 5.1));
+          pushPt(0, 2.50);
+          pushPt(seat.x, 2.50);
+        } else if (Math.abs(sz - 2.50) <= 0.72) {
+          pushPt(seat.x, 2.50);
+        } else {
+          if (Math.abs(sx) > 0.75) {
+            const safeCrossZ = sz < -1.8 ? -2.0 : (sz < 0.4 ? 0.0 : 2.50);
+            pushPt(0, safeCrossZ);
+          }
+          pushPt(0, 2.50);
+          pushPt(seat.x, 2.50);
+        }
+        pushPt(seat.x, seat.z);
+      }
+      return pts;
+    }
+
+    function startSitRoom201(seatIndex = 0) {
+      if (sceneMode !== 'room201' || activeTransition() || !roomHero || room201Seats.length === 0) return;
+      const seat = room201Seats[seatIndex] || room201Seats[0];
+      if (room201SeatedSeat) {
+        if (room201SeatedSeat.index === seat.index) {
+          startStandFromRoom201();
+        } else {
+          startStandFromRoom201(() => startSitRoom201(seat.index));
+        }
+        return;
+      }
+      const waypoints = buildRoom201SitWaypoints(seat);
+      const segs = [];
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const dist = Math.hypot(waypoints[i + 1][0] - waypoints[i][0], waypoints[i + 1][1] - waypoints[i][1]);
+        segs.push({
+          from: waypoints[i],
+          to: waypoints[i + 1],
+          duration: Math.max(0.28, dist / 2.35)
+        });
+      }
+      room201ClapTimer = 0;
+      resetHeroMotion();
+      room201SitAnim = {
+        mode: 'sit',
+        seat,
+        stage: segs.length > 0 ? 'walk' : 'turn',
+        segs,
+        segIdx: 0,
+        stageTime: 0,
+        startYaw: roomHero.rotation.y
+      };
+      playChime(580, 0.14);
+    }
+
+    function startStandFromRoom201(onDone = null, forExit = false) {
+      if (sceneMode !== 'room201' || !roomHero || !room201SeatedSeat || activeTransition()) return;
+      const seat = room201SeatedSeat;
+      room201ClapTimer = 0;
+      const pts = [[roomHero.position.x, roomHero.position.z], seat.exitPoint];
+      if (forExit && seat.exitClearPoint) {
+        const last = pts[pts.length - 1];
+        if (Math.hypot(seat.exitClearPoint[0] - last[0], seat.exitClearPoint[1] - last[1]) > 0.1) {
+          pts.push(seat.exitClearPoint);
+        }
+      }
+      const segs = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const dist = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+        segs.push({
+          from: pts[i],
+          to: pts[i + 1],
+          duration: Math.max(0.32, dist / 2.15)
+        });
+      }
+      room201SitAnim = {
+        mode: 'stand',
+        seat,
+        stage: 'stand',
+        segs,
+        segIdx: 0,
+        stageTime: 0,
+        onDone
+      };
+      playChime(500, 0.13);
+    }
+
+    function updateRoom201SitAnimation(dt, elapsed) {
+      if (!room201SitAnim || !roomHero) return;
+      const a = room201SitAnim;
+      const seat = a.seat;
+      const shortestAngleDiff = (target, current) =>
+        ((target - current + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+
+      if (a.mode === 'sit') {
+        if (a.stage === 'walk') {
+          const seg = a.segs[a.segIdx];
+          if (!seg) {
+            a.stage = 'turn';
+            a.stageTime = 0;
+            a.startYaw = roomHero.rotation.y;
+            return;
+          }
+          a.stageTime = Math.min(seg.duration, a.stageTime + dt);
+          const u = smooth01(a.stageTime / seg.duration);
+          const nx = THREE.MathUtils.lerp(seg.from[0], seg.to[0], u);
+          const nz = THREE.MathUtils.lerp(seg.from[1], seg.to[1], u);
+          const dx = seg.to[0] - seg.from[0];
+          const dz = seg.to[1] - seg.from[1];
+          roomHero.position.set(nx, 0, nz);
+          if (Math.hypot(dx, dz) > 0.02) {
+            const desiredYaw = Math.atan2(dx, dz);
+            roomHero.rotation.y += shortestAngleDiff(desiredYaw, roomHero.rotation.y) * (1 - Math.exp(-dt * 11));
+            if (isFirstPersonPOV) {
+              fpYaw += shortestAngleDiff(roomHero.rotation.y, fpYaw) * (1 - Math.exp(-dt * 9));
+            }
+          }
+          animateHumanWalk(roomHero, elapsed, 8.2, dt, 0.92);
+          if (a.stageTime >= seg.duration) {
+            a.segIdx += 1;
+            a.stageTime = 0;
+            if (a.segIdx >= a.segs.length) {
+              a.stage = 'turn';
+              a.stageTime = 0;
+              a.startYaw = roomHero.rotation.y;
+            }
+          }
+        } else if (a.stage === 'turn') {
+          const dur = 0.38;
+          a.stageTime = Math.min(dur, a.stageTime + dt);
+          const u = smooth01(a.stageTime / dur);
+          roomHero.rotation.y = a.startYaw + shortestAngleDiff(seat.rotY, a.startYaw) * u;
+          if (isFirstPersonPOV) {
+            fpYaw += shortestAngleDiff(seat.rotY, fpYaw) * (1 - Math.exp(-dt * 9));
+          }
+          animateHumanWalk(roomHero, elapsed, 0, dt, 0);
+          if (a.stageTime >= dur) {
+            roomHero.rotation.y = seat.rotY;
+            roomHero.userData.isSeated = true;
+            a.stage = 'sit';
+            a.stageTime = 0;
+          }
+        } else if (a.stage === 'sit') {
+          const dur = 0.62;
+          a.stageTime = Math.min(dur, a.stageTime + dt);
+          const t = a.stageTime / dur;
+          roomHero.position.x = seat.x;
+          roomHero.position.z = seat.z;
+          roomHero.rotation.y = seat.rotY;
+          applyHeroSitPose(roomHero, t, seat.sitOffsetY);
+          if (isFirstPersonPOV) {
+            fpYaw += shortestAngleDiff(seat.rotY, fpYaw) * (1 - Math.exp(-dt * 10));
+            fpPitch = THREE.MathUtils.lerp(fpPitch, -0.02, 1 - Math.exp(-dt * 6));
+          }
+          if (a.stageTime >= dur) {
+            applyHeroSitPose(roomHero, 1, seat.sitOffsetY);
+            room201SeatedSeat = seat;
+            room201SitAnim = null;
+            updateRoom201HUDControls();
+            playChime(700, 0.16);
+            if (seat.side === 'female') {
+              showSpeechCard('Phòng Họp Hội Đồng 201', 'Bạn đã ngồi vào ghế đại diện học sinh dự buổi gặp mặt tri ân Thầy Cô 20/11. Nhấn “Đứng Dậy” hoặc phím WASD để rời ghế.');
+            } else {
+              showSpeechCard('Hội Trường Văn Nghệ 201', `Bạn đã ngồi vào ${seat.label} để thưởng thức văn nghệ 20/11! Nhấn “Cổ Vũ Văn Nghệ” để vỗ tay hoặc “Đứng Dậy” / WASD để rời ghế.`);
+            }
+          }
+        }
+      } else if (a.mode === 'stand') {
+        if (a.stage === 'stand') {
+          const dur = 0.54;
+          a.stageTime = Math.min(dur, a.stageTime + dt);
+          const t = 1 - a.stageTime / dur;
+          applyHeroSitPose(roomHero, t, seat.sitOffsetY);
+          if (a.stageTime >= dur) {
+            applyHeroSitPose(roomHero, 0, seat.sitOffsetY);
+            roomHero.userData.isSeated = false;
+            room201SeatedSeat = null;
+            updateRoom201HUDControls();
+            a.stage = a.segs.length > 0 ? 'walkout' : 'done';
+            a.stageTime = 0;
+          }
+        } else if (a.stage === 'walkout') {
+          const seg = a.segs[a.segIdx];
+          if (!seg) {
+            a.stage = 'done';
+          } else {
+            a.stageTime = Math.min(seg.duration, a.stageTime + dt);
+            const u = smooth01(a.stageTime / seg.duration);
+            const nx = THREE.MathUtils.lerp(seg.from[0], seg.to[0], u);
+            const nz = THREE.MathUtils.lerp(seg.from[1], seg.to[1], u);
+            const dx = seg.to[0] - seg.from[0];
+            const dz = seg.to[1] - seg.from[1];
+            roomHero.position.set(nx, 0, nz);
+            if (Math.hypot(dx, dz) > 0.02) {
+              const desiredYaw = Math.atan2(dx, dz);
+              roomHero.rotation.y += shortestAngleDiff(desiredYaw, roomHero.rotation.y) * (1 - Math.exp(-dt * 11));
+              if (isFirstPersonPOV) {
+                fpYaw += shortestAngleDiff(roomHero.rotation.y, fpYaw) * (1 - Math.exp(-dt * 9));
+              }
+            }
+            animateHumanWalk(roomHero, elapsed, 8.0, dt, 0.85);
+            if (a.stageTime >= seg.duration) {
+              a.segIdx += 1;
+              a.stageTime = 0;
+              if (a.segIdx >= a.segs.length) a.stage = 'done';
+            }
+          }
+        }
+        if (a.stage === 'done') {
+          const cb = a.onDone;
+          room201SitAnim = null;
+          resetHeroMotion();
+          if (cb) cb();
+        }
+      }
     }
 
     function startStairClimb(targetHallwayMode, goingUp) {
@@ -7148,6 +7557,7 @@
       }
       if (room101GiftAnim && roomHero && room101Teacher) updateGiftCeremony(room101GiftAnim,dt,elapsed);
       if (room301GiftAnim && roomHero && room301Teacher) updateGiftCeremony(room301GiftAnim,dt,elapsed);
+      if (room201SitAnim && roomHero && sceneMode === 'room201') updateRoom201SitAnimation(dt, elapsed);
       if (giftBloom) {
         giftBloom.time += dt;
         if (giftBloom.time >= 0.7) giftBloom = null;
@@ -7174,6 +7584,10 @@
       animateRoom103Reader(dt,elapsed);
 
       if (sceneMode === 'room201') {
+        const cheering = room201ClapTimer > 0;
+        if (room201ClapTimer > 0) {
+          room201ClapTimer = Math.max(0, room201ClapTimer - dt);
+        }
         room201Performers.forEach((p, idx) => {
           p.position.y = 0.65 + Math.abs(Math.sin(elapsed * 4 + idx)) * 0.06;
           if (p.userData.leftArm) p.userData.leftArm.rotation.z = -0.35 + Math.sin(elapsed * 3.5 + idx) * 0.25;
@@ -7181,9 +7595,81 @@
         });
         room201Audience.forEach((a) => {
           if (a.mesh && a.mesh.userData && a.mesh.userData.headGroup) {
-            a.mesh.userData.headGroup.rotation.x = Math.sin(elapsed * 3 + a.phase) * 0.06;
+            a.mesh.userData.headGroup.rotation.x = Math.sin(elapsed * (cheering ? 6 : 3) + a.phase) * (cheering ? 0.11 : 0.06);
+          }
+          if (a.mesh && a.mesh.userData && a.mesh.userData.leftArm && a.mesh.userData.rightArm) {
+            if (cheering) {
+              const clap = Math.sin(elapsed * 12 + a.phase);
+              a.mesh.userData.leftArm.rotation.x = -1.15 + clap * 0.24;
+              a.mesh.userData.rightArm.rotation.x = -1.15 - clap * 0.24;
+            } else {
+              a.mesh.userData.leftArm.rotation.x = THREE.MathUtils.lerp(a.mesh.userData.leftArm.rotation.x, -0.45, 1 - Math.exp(-dt * 6));
+              a.mesh.userData.rightArm.rotation.x = THREE.MathUtils.lerp(a.mesh.userData.rightArm.rotation.x, -0.45, 1 - Math.exp(-dt * 6));
+            }
           }
         });
+        // Seated hero gentle life + enthusiastic clapping/cheering animation
+        if (roomHero && !room201SitAnim) {
+          const d = roomHero.userData;
+          if (cheering) {
+            const clap = Math.abs(Math.sin(elapsed * 11));
+            if (d.leftArm) {
+              d.leftArm.rotation.x = -1.28 + Math.sin(elapsed * 11) * 0.18;
+              d.leftArm.rotation.z = -0.30 + clap * 0.24;
+              if (d.leftArm.userData?.lowerPivot) d.leftArm.userData.lowerPivot.rotation.x = -0.78;
+            }
+            if (d.rightArm) {
+              d.rightArm.rotation.x = -1.28 - Math.sin(elapsed * 11) * 0.18;
+              d.rightArm.rotation.z = 0.30 - clap * 0.24;
+              if (d.rightArm.userData?.lowerPivot) d.rightArm.userData.lowerPivot.rotation.x = -0.78;
+            }
+            if (d.headGroup) {
+              d.headGroup.rotation.x = Math.sin(elapsed * 7) * 0.09;
+              d.headGroup.rotation.y = Math.sin(elapsed * 3.2) * 0.08;
+            }
+          } else if (room201SeatedSeat) {
+            const relax = 1 - Math.exp(-dt * 7);
+            if (d.leftArm) {
+              d.leftArm.rotation.x = THREE.MathUtils.lerp(d.leftArm.rotation.x, -0.62, relax);
+              d.leftArm.rotation.z = THREE.MathUtils.lerp(d.leftArm.rotation.z, -0.06, relax);
+              if (d.leftArm.userData?.lowerPivot) {
+                d.leftArm.userData.lowerPivot.rotation.x = THREE.MathUtils.lerp(d.leftArm.userData.lowerPivot.rotation.x, -0.52, relax);
+              }
+            }
+            if (d.rightArm) {
+              d.rightArm.rotation.x = THREE.MathUtils.lerp(d.rightArm.rotation.x, -0.58, relax);
+              d.rightArm.rotation.z = THREE.MathUtils.lerp(d.rightArm.rotation.z, 0.06, relax);
+              if (d.rightArm.userData?.lowerPivot) {
+                d.rightArm.userData.lowerPivot.rotation.x = THREE.MathUtils.lerp(d.rightArm.userData.lowerPivot.rotation.x, -0.55, relax);
+              }
+            }
+            if (d.headGroup) {
+              d.headGroup.rotation.x = Math.sin(elapsed * 2.2) * 0.045;
+              d.headGroup.rotation.y = Math.sin(elapsed * 0.9) * 0.12;
+            }
+          } else {
+            const relax = 1 - Math.exp(-dt * 7);
+            if (d.leftArm) {
+              d.leftArm.rotation.z = THREE.MathUtils.lerp(d.leftArm.rotation.z, 0, relax);
+              if (d.leftArm.userData?.lowerPivot) {
+                d.leftArm.userData.lowerPivot.rotation.x = THREE.MathUtils.lerp(d.leftArm.userData.lowerPivot.rotation.x, 0, relax);
+              }
+            }
+            if (d.rightArm) {
+              if (d.bouquetMesh?.visible) {
+                d.rightArm.rotation.x = THREE.MathUtils.lerp(d.rightArm.rotation.x, 0, relax);
+              }
+              d.rightArm.rotation.z = THREE.MathUtils.lerp(d.rightArm.rotation.z, 0, relax);
+              if (d.rightArm.userData?.lowerPivot) {
+                d.rightArm.userData.lowerPivot.rotation.x = THREE.MathUtils.lerp(d.rightArm.userData.lowerPivot.rotation.x, 0, relax);
+              }
+            }
+            if (d.headGroup) {
+              d.headGroup.rotation.x = THREE.MathUtils.lerp(d.headGroup.rotation.x, 0, relax);
+              d.headGroup.rotation.y = THREE.MathUtils.lerp(d.headGroup.rotation.y, 0, relax);
+            }
+          }
+        }
       }
 
       // Gentle breathing / head-nodding life across all classroom & hallway characters
@@ -7198,6 +7684,13 @@
       if (roomHero && sceneMode !== 'intro' && sceneMode !== 'campus') {
         const canControl = !activeTransition() && !room102SlidePointer &&
           !document.querySelector('.fixed.inset-0.z-50:not(.hidden)');
+        if (room201SeatedSeat) {
+          heroVelocity.set(0, 0, 0);
+          if (canControl && (keysPressed.KeyW || keysPressed.KeyS || keysPressed.KeyA || keysPressed.KeyD ||
+              keysPressed.ArrowUp || keysPressed.ArrowDown || keysPressed.ArrowLeft || keysPressed.ArrowRight)) {
+            startStandFromRoom201();
+          }
+        } else {
         let ax = 0, az = 0;
         if (canControl) {
           if (keysPressed.KeyW || keysPressed.ArrowUp) az += 1;
@@ -7242,6 +7735,7 @@
           roomHero.rotation.y += delta * (1 - Math.exp(-dt * 12));
         }
         if (!activeTransition()) animateHumanWalk(roomHero, elapsed, speed > 0.07 ? 8 : 0, dt, speed / topSpeed);
+        }
       }
 
       ceilingFans.forEach((fan) => {
@@ -7278,6 +7772,14 @@
             const desireTarget = new THREE.Vector3(0, 1.32, b ? -3.3 : -3.5);
             camera.position.lerp(desirePos, 1 - Math.exp(-dt * 2.4));
             controls.target.lerp(desireTarget, 1 - Math.exp(-dt * 2.4));
+          }
+          if (room201SitAnim && room201SitAnim.mode === 'sit' &&
+              (room201SitAnim.stage === 'turn' || room201SitAnim.stage === 'sit') &&
+              room201SitAnim.seat?.camPos) {
+            const sp = room201SitAnim.seat.camPos;
+            const st = room201SitAnim.seat.camTarget;
+            camera.position.lerp(new THREE.Vector3(sp[0], sp[1], sp[2]), 1 - Math.exp(-dt * 3.0));
+            controls.target.lerp(new THREE.Vector3(st[0], st[1], st[2]), 1 - Math.exp(-dt * 3.0));
           }
           const hall = sceneMode.startsWith('hallway');
           const limX = hall ? 12.55 : Math.max(4.5, activeRoomSpec.width / 2 - 0.60);
@@ -7389,6 +7891,7 @@
         zoom_photo_301: '🔍 Phóng to Ảnh Kỷ Niệm',
         open_tribute_tree: '💌 Viết & Treo Thiệp lên Cây Tri Ân',
         greet_boardroom_teacher: '🤝 Kính chào Thầy/Cô Hội Đồng',
+        sit_room201_seat: '🪑 Ngồi xuống ghế',
         inspect_honor_plaque: '🏅 Xem Bảng Vàng Danh Dự',
         open_pink301_modal: '📌 Tải ảnh / Treo lời chúc lên khung',
         open_pink302_modal: '🎁 Đặt hoa, quà & Nhận Chứng Nhận'
@@ -7440,7 +7943,12 @@
         if (type && INTERACTION_LABELS[type]) {
           canvasContainer?.classList.add('interactive-hover');
           if (hoverTooltip) {
-            hoverTooltip.textContent = INTERACTION_LABELS[type];
+            let label = INTERACTION_LABELS[type];
+            if (type === 'sit_room201_seat' && room201SeatedSeat &&
+                room201SeatedSeat.index === (hits[0].object.userData.seatIndex || 0)) {
+              label = '🧍 Đứng dậy khỏi ghế';
+            }
+            hoverTooltip.textContent = label;
             hoverTooltip.style.left = `${e.clientX}px`;
             hoverTooltip.style.top = `${e.clientY}px`;
             hoverTooltip.classList.remove('hidden');
@@ -7974,6 +8482,8 @@
         else if (type === 'open_tribute_tree') openTributeTreeModal(hits[0].object.userData.treeSide || 'left');
         else if (type === 'greet_boardroom_teacher') {
           showSpeechCard(hits[0].object.userData.teacherLabel || 'Hội Đồng Giáo Viên', 'Chúc các em học sinh luôn chăm ngoan, học giỏi và giữ mãi tình cảm đẹp dưới mái trường thân yêu!');
+        } else if (type === 'sit_room201_seat') {
+          startSitRoom201(hits[0].object.userData.seatIndex || 0);
         } else if (type === 'inspect_honor_plaque') {
           showSpeechCard('Bảng Vàng Danh Dự 20/11', hits[0].object.userData.honorTitle || 'Vinh danh thành tích xuất sắc của Quý Thầy Cô.');
         } else if (type === 'open_pink301_modal') openPink301Modal(hits[0].object.userData.slotIndex || 0);
