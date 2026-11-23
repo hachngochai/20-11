@@ -1,49 +1,69 @@
 * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
-    html, body {
-      margin: 0; padding: 0; width: 100%; height: 100%;
-      overflow: hidden; background: #090d16; user-select: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-    #canvas-container { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; }
-    .glass-panel {
-      background: rgba(15, 23, 42, 0.78);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      box-shadow: 0 14px 36px -6px rgba(2, 6, 23, 0.62);
-    }
-    #camera-flash {
-      position: fixed; inset: 0; background: #ffffff; opacity: 0;
-      pointer-events: none; z-index: 50; transition: opacity 0.35s ease-out;
-    }
-    .photo-zoom-img {
-      transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-      transform-origin: center center;
-    }
-    @keyframes modalPopIn {
-      0% { opacity: 0; transform: scale(0.86) translateY(14px); }
-      100% { opacity: 1; transform: scale(1) translateY(0); }
-    }
-    .modal-pop {
-      animation: modalPopIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-    }
-/* V2 • Independent cameras, scene transitions and intelligible dialogue */
-#scene-curtain { position:fixed;inset:0;z-index:29;background:#020817;opacity:0;pointer-events:none;transition:opacity .32s ease; }
+html, body {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  overflow: hidden; background: #090d16; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#canvas-container { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; }
+#canvas-container.interactive-hover { cursor: pointer; }
+.glass-panel {
+  background: rgba(15, 23, 42, 0.80);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 12px 32px -6px rgba(2, 6, 23, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+#hover-tooltip {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 14px));
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.90);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  color: #fef3c7;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(10px);
+}
+#camera-flash {
+  position: fixed; inset: 0; background: #ffffff; opacity: 0;
+  pointer-events: none; z-index: 50; transition: opacity 0.35s ease-out;
+}
+.photo-zoom-img {
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: center center;
+}
+@keyframes modalPopIn {
+  0% { opacity: 0; transform: scale(0.9) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-pop {
+  animation: modalPopIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Scene transitions, independent cameras and subtitles */
+#scene-curtain { position:fixed;inset:0;z-index:29;background:#020817;opacity:0;pointer-events:none;transition:opacity .3s ease; }
 #scene-curtain.is-active {opacity:.92;}
 .cam-mode-switch {display:flex;align-items:center;gap:3px;padding:3px;}
-.cam-mode-switch button {font-size:11px;line-height:1.25;min-height:34px;padding:7px 10px;border-radius:9px;color:#e2e8f0;font-weight:750;white-space:nowrap;transition:background .2s,color .2s;}
+.cam-mode-switch button {font-size:11px;line-height:1.25;min-height:34px;padding:7px 10px;border-radius:9px;color:#e2e8f0;font-weight:700;white-space:nowrap;transition:background .2s,color .2s;}
 .cam-mode-switch button:hover {background:rgba(255,255,255,.12);}
-.cam-mode-switch button.camera-active {color:#082f49;background:linear-gradient(135deg,#fbbf24,#fcd34d);box-shadow:0 2px 10px rgba(251,191,36,.26);}
+.cam-mode-switch button.camera-active {color:#082f49;background:linear-gradient(135deg,#fbbf24,#fcd34d);box-shadow:0 2px 10px rgba(251,191,36,.32);}
 .audio-button {min-height:40px;}
 #speech-card {z-index:35;bottom:112px;max-width:600px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
 #speech-text {font-size:14px;line-height:1.65;}
-#classroom-controls {max-width:min(95vw,900px);gap:6px;}
-#classroom-controls button {max-width:165px;white-space:normal;text-align:center;min-height:32px;padding:6px 9px;}
+#classroom-controls {max-width:min(95vw,940px);gap:6px;}
+#classroom-controls button {max-width:190px;white-space:normal;text-align:center;min-height:34px;padding:7px 12px;}
 #main-ui > .flex:first-child {align-items:flex-start;}
 #payment-5k-modal button[disabled] {opacity:.45;cursor:not-allowed;}
+
 @media(max-width:640px) {
   #main-ui {padding:10px;}
   #main-ui > .flex:first-child {gap:4px;}
+  #scene-location-pill {display:none;}
   .cam-mode-switch button {padding:7px;font-size:10px;}
   .audio-button {padding:7px;font-size:10px;}
   #gfx-toggle-label {display:none;}
@@ -51,21 +71,20 @@
 }
 @media(prefers-reduced-motion:reduce){#scene-curtain,.cam-mode-switch button{transition:none;} .modal-pop{animation:none;} }
 
-/* V3: restrained photographic vignette, without obscuring interactions. */
+/* Subtle photographic vignette without dimming clarity */
 #canvas-container::after {
   content:""; position:absolute; inset:0; pointer-events:none; z-index:2;
-  background:radial-gradient(ellipse 78% 76% at 51% 44%,transparent 45%,rgba(6,13,25,.07) 80%,rgba(6,13,25,.14) 100%);
+  background:radial-gradient(ellipse 80% 78% at 50% 45%,transparent 52%,rgba(6,13,25,.05) 82%,rgba(6,13,25,.12) 100%);
 }
 #canvas-container canvas {display:block; width:100%; height:100%;}
 @media (max-width:640px) {
-  #canvas-container::after {background:radial-gradient(ellipse 95% 85% at 51% 42%,transparent 53%,rgba(6,13,25,.11) 100%);}
+  #canvas-container::after {background:radial-gradient(ellipse 95% 85% at 50% 44%,transparent 58%,rgba(6,13,25,.09) 100%);}
 }
 
-
-/* V8: bound-paper anthology, natural page depth and a real hinged leaf. */
+/* Bound-paper anthology viewer */
 .anthology-viewer { max-height:96vh; overflow:auto; }
 #anthology-book-tabs { scrollbar-width:thin; scrollbar-color:#c8a977 transparent; }
-.anthology-tab { flex-shrink:0; background:rgba(255,255,255,.09); color:#f1dfb6; border:1px solid rgba(255,255,255,.10); }
+.anthology-tab { flex-shrink:0; background:rgba(255,255,255,.09); color:#f1dfb6; border:1px solid rgba(255,255,255,.10); transition: background .2s, color .2s; }
 .anthology-tab:hover { background:rgba(255,255,255,.17); }
 .anthology-tab.anthology-tab-active { background:#e9b965; border-color:#fff0c5; color:#44260e; }
 .anthology-book-shell {
@@ -86,13 +105,13 @@
 }
 .anthology-paper-left {border-radius:3px 0 0 3px;box-shadow:inset -9px 0 17px rgba(54,32,12,.13);}
 .anthology-paper-right {border-radius:0 3px 3px 0;box-shadow:inset 9px 0 17px rgba(54,32,12,.17);}
-.anthology-paper-top {font:700 10px/1.5 Georgia,serif;letter-spacing:2px;color:#906536;padding-bottom:12px;border-bottom:1px solid #d6c0a1;}
-.anthology-page-title {font:700 clamp(17px,2vw,29px)/1.2 Georgia,"Times New Roman",serif;color:#683c2b;margin:20px 0 12px;}
-.anthology-page-text {font:400 clamp(12px,1.15vw,16px)/1.83 Georgia,serif;white-space:pre-line; overflow-wrap:anywhere; }
+.anthology-paper-top {font:700 10px/1.5 'Inter',sans-serif;letter-spacing:2px;color:#906536;padding-bottom:12px;border-bottom:1px solid #d6c0a1;}
+.anthology-page-title {font:800 clamp(17px,2vw,27px)/1.28 'Inter',sans-serif;color:#683c2b;margin:20px 0 12px;}
+.anthology-page-text {font:500 clamp(12px,1.15vw,16px)/1.85 'Inter',sans-serif;white-space:pre-line; overflow-wrap:anywhere; }
 .anthology-flourish {font-size:25px;color:#bc8656;align-self:center;margin-top:14px;}
 .anthology-ink-decoration {font-size:38px;color:#bc8656;align-self:center;margin:22px 0;}
-.anthology-page-author {margin-top:auto;text-align:right;font:italic 600 14px Georgia,serif;color:#825837;padding-bottom:17px;}
-.anthology-page-number {position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font:700 12px Georgia,serif;color:#b38b62;}
+.anthology-page-author {margin-top:auto;text-align:right;font:italic 600 14px 'Inter',sans-serif;color:#825837;padding-bottom:17px;}
+.anthology-page-number {position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font:700 12px 'Inter',sans-serif;color:#b38b62;}
 .anthology-turn-sheet {
   position:absolute;top:0;bottom:0;left:50%;width:50%;z-index:5;
   transform-origin:left center;transform:rotateY(0deg);pointer-events:none;

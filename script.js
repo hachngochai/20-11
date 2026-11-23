@@ -228,10 +228,14 @@
     let graphicsUltra = true;
     let atmosphereMotes = null;
     let skyShaderUniforms = null;
+    let outdoorEnvTexture = null;
+    let indoorEnvTexture = null;
+    let introElapsed = 0;
     let campusBirds = [];
     let fountainWaterJets = [];
     let room101BoardMesh = null;
     let room101SavedWishes = [];
+    const room101SavedWishesByBuilding = { teacher: [], female: [] };
     let ceilingFans = [];
     let scooterWheels = [];
     let campusScooterGroup = null;
@@ -245,12 +249,13 @@
     const PROTAGONIST_APPEARANCE = Object.freeze({
       gender: 'male', role: 'student',
       shirtColor: 0xf8fafc, pantsColor: 0x1e293b,
-      hairColor: 0x18181b, skinColor: 0xf8d0b8,
+      hairColor: 0x18181b, skinColor: 0xf7ceb4,
       hasBouquet: true, isSeated: false,
       keepOriginalAppearance: true
     });
     let floatingPetals = [];
     let activeIdleCharacters = [];
+    let giftBloomParticles = [];
 
     let campusDismountAnim = null;
     let campusEnterBuildingAnim = null;
@@ -268,9 +273,11 @@
     let room102SlidePointer = null;
     let slideIgnoreClickUntil = 0;
     let currentSlideIdx = 0;
+    let currentArtworkIdx = 0;
     let currentAnthologyBookIdx = 0;
     let currentAnthologyPageIdx = 0;
     let anthologyTurning = false;
+    let anthologyTurnTimers = [];
     let room103Reader = null;
     let room103ReaderBook = null;
     let room103PageTurn = null;
@@ -291,9 +298,22 @@
     let pink301ActiveTab = 'photo';
     let pink301PendingDataURL = null;
     let pink301Frames = [];
+    let pink301SelectedSlot = 0;
+    const pink301SavedSlots = {};
     let pink302SelectedItem = 'flower';
     let pink302TableGroup = null;
     let pink302PlacedCount = 0;
+    const pink302PlacedItems = [];
+    let activeRoomSpec = { width: 14, depth: 12, height: 3.8 };
+    const ROOM_DOOR_X = {
+      room101: -9.2,
+      room102: -4.6,
+      room103: 6.8,
+      room201: -6.8,
+      room202: 6.8,
+      room301: -6.8,
+      room302: 6.8
+    };
 
     const keysPressed = {};
     let interiorColliders = [];
@@ -384,11 +404,9 @@
     }
 
     function avatarCanOccupy(x, z) {
-      const b = SCENE_CAMERA_BOUNDS[sceneMode] || SCENE_CAMERA_BOUNDS.room101;
-      // Scene bounds are camera guides, not the actual walls.
       const hall = sceneMode.startsWith('hallway');
-      const w = hall ? 12.48 : ({room201:7.65, room301:7.0, room302:7.3}[sceneMode] || 6.35);
-      const d = hall ? 3.00 : ({room201:6.5, room301:6.0, room302:5.9}[sceneMode] || 5.35);
+      const w = hall ? 12.35 : Math.max(3.5, activeRoomSpec.width / 2 - 0.65);
+      const d = hall ? 3.05 : Math.max(3.5, activeRoomSpec.depth / 2 - 0.65);
       if (Math.abs(x) > w || Math.abs(z) > d) return false;
       return !interiorColliders.some(c => x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ);
     }
@@ -731,8 +749,10 @@
     function updatePOVButtonUI() {
       const whole = document.getElementById('btn-camera-overview');
       const pov = document.getElementById('btn-camera-donor');
+      const hint = document.getElementById('pov-controls-hint');
       if (whole) { whole.classList.toggle('camera-active', !isFirstPersonPOV); whole.setAttribute('aria-pressed', String(!isFirstPersonPOV)); }
       if (pov) { pov.classList.toggle('camera-active', isFirstPersonPOV); pov.setAttribute('aria-pressed', String(isFirstPersonPOV)); }
+      if (hint) hint.classList.toggle('hidden', !(isFirstPersonPOV && sceneMode !== 'campus' && sceneMode !== 'intro'));
       if (roomHero && sceneMode !== 'campus' && sceneMode !== 'intro') roomHero.visible = !isFirstPersonPOV;
     }
 
@@ -776,42 +796,55 @@
     function configureLightingForMode(mode) {
       if (!hemiLight || !sunLight || !fillLight) return;
       const outdoor = mode === 'intro' || mode === 'campus';
-      if(outdoor) {
-        hemiLight.intensity=0.53;
-        sunLight.intensity=0.90;
-        fillLight.intensity=0.19;
-        scene.fog = new THREE.FogExp2(0xcbdde9,graphicsUltra?0.0027:0.0034);
-        renderer.toneMappingExposure=0.85;
+      if (outdoor) {
+        hemiLight.color.setHex(0xdbeafe);
+        hemiLight.groundColor.setHex(0x3f6212);
+        hemiLight.intensity = 0.60;
+        sunLight.color.setHex(0xfff4d8);
+        sunLight.position.set(26, 40, 28);
+        sunLight.intensity = 1.24;
+        fillLight.color.setHex(0xfde68a);
+        fillLight.position.set(-20, 16, -18);
+        fillLight.intensity = 0.24;
+        scene.fog = new THREE.FogExp2(0xd7e9f5, graphicsUltra ? 0.0019 : 0.0025);
+        renderer.toneMappingExposure = 0.96;
+        if (outdoorEnvTexture) scene.environment = outdoorEnvTexture;
       } else {
-        hemiLight.intensity=0.50;
-        sunLight.intensity=0.62;
-        fillLight.intensity=0.21;
-        scene.fog = new THREE.FogExp2(0xf1f5f9,0.0029);
-        renderer.toneMappingExposure=0.88;
+        // Warm indoor studio lighting with soft window side-key; avoids washed-out sky tint.
+        hemiLight.color.setHex(0xfffaf0);
+        hemiLight.groundColor.setHex(0x5a4031);
+        hemiLight.intensity = 0.56;
+        sunLight.color.setHex(0xfff6e5);
+        sunLight.position.set(-14, 18, 9);
+        sunLight.intensity = 0.78;
+        fillLight.color.setHex(0xe2f1ff);
+        fillLight.position.set(14, 10, 10);
+        fillLight.intensity = 0.24;
+        scene.fog = new THREE.FogExp2(0xf4f4f2, 0.0008);
+        renderer.toneMappingExposure = 0.94;
+        if (indoorEnvTexture) scene.environment = indoorEnvTexture;
       }
-      // Shadow texels are distributed where the user actually stands.
-      // The previous 72m-wide frustum made classroom edges visibly pixelated.
-      const extent=outdoor?44:17;
-      const sh=sunLight.shadow;
-      sh.camera.left=-extent;sh.camera.right=extent;
-      sh.camera.top=extent;sh.camera.bottom=-extent;
-      sh.camera.near=1;sh.camera.far=outdoor?125:82;
+      const extent = outdoor ? 46 : 16;
+      const sh = sunLight.shadow;
+      sh.camera.left = -extent; sh.camera.right = extent;
+      sh.camera.top = extent; sh.camera.bottom = -extent;
+      sh.camera.near = 1; sh.camera.far = outdoor ? 125 : 64;
       sh.camera.updateProjectionMatrix();
-      sh.normalBias=outdoor?0.014:0.009;
-      sh.bias=-0.00016;
-      sh.radius=graphicsUltra?1.3:1.15;
-      renderer.shadowMap.needsUpdate=true;
+      sh.normalBias = outdoor ? 0.014 : 0.009;
+      sh.bias = -0.00018;
+      sh.radius = graphicsUltra ? 1.5 : 1.15;
+      renderer.shadowMap.needsUpdate = true;
     }
 
     function createSkyDomeAndEnvMap() {
-      const skyGeo = new THREE.SphereGeometry(180, 40, 32);
+      const skyGeo = new THREE.SphereGeometry(185, 44, 32);
       skyShaderUniforms = {
         uTime: { value: 0 },
-        uSunDir: { value: new THREE.Vector3(0.45, 0.62, 0.42).normalize() },
-        uTopColor: { value: new THREE.Color(0x174b70) },
-        uMidColor: { value: new THREE.Color(0x79badb) },
-        uHorizonColor: { value: new THREE.Color(0xc9dfe9) },
-        uSunColor: { value: new THREE.Color(0xfffbeb) }
+        uSunDir: { value: new THREE.Vector3(0.45, 0.58, 0.44).normalize() },
+        uTopColor: { value: new THREE.Color(0x16558f) },
+        uMidColor: { value: new THREE.Color(0x63b3e2) },
+        uHorizonColor: { value: new THREE.Color(0xeef6fa) },
+        uSunColor: { value: new THREE.Color(0xfff5d1) }
       };
 
       const skyMat = new THREE.ShaderMaterial({
@@ -837,15 +870,16 @@
           void main() {
             vec3 dir = normalize(vWorldPos);
             float h = clamp(dir.y, 0.0, 1.0);
-            vec3 col = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.28, h));
-            col = mix(col, uTopColor, smoothstep(0.24, 0.85, h));
+            vec3 col = mix(uHorizonColor, uMidColor, smoothstep(0.0, 0.30, h));
+            col = mix(col, uTopColor, smoothstep(0.26, 0.88, h));
 
             float sunAmt = max(dot(dir, uSunDir), 0.0);
-            float halo = pow(sunAmt, 12.0) * 0.045 + pow(sunAmt, 80.0) * 0.085;
-            float disc = smoothstep(0.9988, 0.9997, sunAmt) * 0.17;
-            col += uSunColor * (halo + disc);
+            float warmGlow = pow(sunAmt, 5.0) * 0.14;
+            float halo = pow(sunAmt, 18.0) * 0.10 + pow(sunAmt, 96.0) * 0.18;
+            float disc = smoothstep(0.9985, 0.9996, sunAmt) * 0.38;
+            col += uSunColor * (warmGlow + halo + disc);
 
-            float mist = sin(dir.x * 7.0 + uTime * 0.18) * cos(dir.z * 7.0 - uTime * 0.14) * 0.025 * (1.0 - h);
+            float mist = sin(dir.x * 6.0 + uTime * 0.15) * cos(dir.z * 6.0 - uTime * 0.12) * 0.02 * (1.0 - h);
             col += vec3(mist);
             gl_FragColor = vec4(col, 1.0);
           }
@@ -854,26 +888,55 @@
       const skyDome = new THREE.Mesh(skyGeo, skyMat);
       scene.add(skyDome);
 
-      const envTex = makeCanvasTexture('sky_env_grad', 512, 512, (ctx, w, h) => {
-        const grad = ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0.0, '#0284c7');
-        grad.addColorStop(0.45, '#38bdf8');
-        grad.addColorStop(0.78, '#bae6fd');
-        grad.addColorStop(1.0, '#fef3c7');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, w, h);
-      });
-
       if (renderer && THREE.PMREMGenerator) {
         const pmrem = new THREE.PMREMGenerator(renderer);
-        const envScene = new THREE.Scene();
-        const envMesh = new THREE.Mesh(
+
+        // 1) Outdoor PMREM: balanced warm sunlight + azure sky + earthy ground bounce
+        const outTex = makeCanvasTexture('sky_env_outdoor_v10', 512, 256, (ctx, w, h) => {
+          const grad = ctx.createLinearGradient(0, 0, 0, h);
+          grad.addColorStop(0.0, '#1d5fa3');
+          grad.addColorStop(0.38, '#7cc4eb');
+          grad.addColorStop(0.52, '#fef3c7');
+          grad.addColorStop(0.58, '#b8a990');
+          grad.addColorStop(1.0, '#4a6b35');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, w, h);
+          const sun = ctx.createRadialGradient(w * 0.72, h * 0.28, 4, w * 0.72, h * 0.28, 72);
+          sun.addColorStop(0, 'rgba(255,250,220,0.95)');
+          sun.addColorStop(1, 'rgba(255,245,200,0)');
+          ctx.fillStyle = sun;
+          ctx.fillRect(0, 0, w, h);
+        });
+        const outScene = new THREE.Scene();
+        outScene.add(new THREE.Mesh(
           new THREE.SphereGeometry(40, 24, 16),
-          new THREE.MeshBasicMaterial({ map: envTex, side: THREE.BackSide })
-        );
-        envScene.add(envMesh);
-        const envRT = pmrem.fromScene(envScene, 0.035);
-        scene.environment = envRT.texture;
+          new THREE.MeshBasicMaterial({ map: outTex, side: THREE.BackSide })
+        ));
+        outdoorEnvTexture = pmrem.fromScene(outScene, 0.04).texture;
+
+        // 2) Indoor PMREM: warm architectural bounce, preserves rich dark woods/fabrics/hair
+        const inTex = makeCanvasTexture('room_env_indoor_v10', 512, 256, (ctx, w, h) => {
+          const grad = ctx.createLinearGradient(0, 0, 0, h);
+          grad.addColorStop(0.0, '#dcd5c7');
+          grad.addColorStop(0.45, '#b8b1a6');
+          grad.addColorStop(0.55, '#8f7d6c');
+          grad.addColorStop(1.0, '#5a4636');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, w, h);
+          // Warm ceiling strips & soft window daylight bounce
+          ctx.fillStyle = 'rgba(255,248,232,0.55)';
+          ctx.fillRect(w * 0.12, h * 0.32, w * 0.22, h * 0.24);
+          ctx.fillStyle = 'rgba(255,250,238,0.45)';
+          ctx.fillRect(w * 0.35, h * 0.08, w * 0.30, h * 0.10);
+        });
+        const inScene = new THREE.Scene();
+        inScene.add(new THREE.Mesh(
+          new THREE.SphereGeometry(40, 24, 16),
+          new THREE.MeshBasicMaterial({ map: inTex, side: THREE.BackSide })
+        ));
+        indoorEnvTexture = pmrem.fromScene(inScene, 0.045).texture;
+
+        scene.environment = outdoorEnvTexture;
         pmrem.dispose();
       }
     }
@@ -1089,91 +1152,282 @@
       return frame;
     }
 
-    function createArtCanvasDataURL(art) {
+    function renderArtToCanvas(art) {
       const canvas = document.createElement('canvas');
-      // Render art and gallery photo thumbnails at 1.5x native sharpness.
       canvas.width = 960;
       canvas.height = 630;
       const ctx = canvas.getContext('2d');
       ctx.scale(1.5, 1.5);
 
-      const grad = ctx.createLinearGradient(0, 0, 0, 420);
-      grad.addColorStop(0, art.bg || '#0369a1');
-      grad.addColorStop(0.65, '#1e293b');
-      grad.addColorStop(1, '#0f172a');
-      ctx.fillStyle = grad;
+      // Rich atmospheric sky gradient
+      const sky = ctx.createLinearGradient(0, 0, 0, 315);
+      sky.addColorStop(0, art.bg || '#0369a1');
+      sky.addColorStop(0.58, '#1e293b');
+      sky.addColorStop(1, '#312e4b');
+      ctx.fillStyle = sky;
       ctx.fillRect(0, 0, 640, 420);
 
-      const sunGrad = ctx.createRadialGradient(485, 105, 8, 485, 105, 95);
-      sunGrad.addColorStop(0, art.accent || '#fde047');
+      // Warm sun / moon radiance
+      const sx = art.sceneType === 'lighthouse' ? 155 : 480;
+      const sy = 96;
+      const sunGrad = ctx.createRadialGradient(sx, sy, 6, sx, sy, 128);
+      sunGrad.addColorStop(0, '#fffbeb');
+      sunGrad.addColorStop(0.22, art.accent || '#fde047');
+      sunGrad.addColorStop(0.6, 'rgba(253, 224, 71, 0.22)');
       sunGrad.addColorStop(1, 'rgba(253, 224, 71, 0)');
       ctx.fillStyle = sunGrad;
       ctx.beginPath();
-      ctx.arc(485, 105, 95, 0, Math.PI * 2);
+      ctx.arc(sx, sy, 128, 0, Math.PI * 2);
       ctx.fill();
+
+      // Soft painter clouds
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      [[110, 68, 72, 18], [160, 74, 56, 15], [340, 56, 86, 20], [540, 126, 62, 15]].forEach(([cx, cy, rx, ry]) => {
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
 
       ctx.save();
       if (art.sceneType === 'ferry') {
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.32)';
-        ctx.fillRect(0, 235, 640, 185);
-        ctx.fillStyle = '#fef08a';
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
         ctx.beginPath();
-        ctx.moveTo(190, 260);
-        ctx.lineTo(430, 260);
-        ctx.lineTo(395, 290);
-        ctx.lineTo(225, 290);
+        ctx.moveTo(0, 220);
+        ctx.quadraticCurveTo(130, 145, 270, 208);
+        ctx.quadraticCurveTo(420, 138, 640, 215);
+        ctx.lineTo(640, 240);
+        ctx.lineTo(0, 240);
         ctx.closePath();
         ctx.fill();
-        ctx.fillRect(285, 185, 14, 75);
+        const river = ctx.createLinearGradient(0, 220, 0, 320);
+        river.addColorStop(0, '#0c4a6e');
+        river.addColorStop(1, '#082f49');
+        ctx.fillStyle = river;
+        ctx.fillRect(0, 220, 640, 110);
+        for (let r = 0; r < 9; r++) {
+          ctx.fillStyle = `rgba(254, 240, 138, ${0.42 - r * 0.04})`;
+          ctx.fillRect(435 - r * 7, 228 + r * 9, 88 + r * 14, 3);
+        }
+        ctx.fillStyle = '#451a03';
+        ctx.beginPath();
+        ctx.moveTo(155, 250);
+        ctx.quadraticCurveTo(295, 266, 445, 245);
+        ctx.lineTo(405, 286);
+        ctx.quadraticCurveTo(295, 294, 195, 286);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath(); ctx.arc(248, 198, 12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(237, 211, 22, 42);
+        ctx.strokeStyle = '#fde047'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(255, 220); ctx.lineTo(315, 295); ctx.stroke();
+        const glow = ctx.createRadialGradient(412, 222, 2, 412, 222, 28);
+        glow.addColorStop(0, '#fef08a'); glow.addColorStop(1, 'rgba(254,240,138,0)');
+        ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(412, 222, 28, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#f59e0b'; ctx.fillRect(407, 214, 10, 15);
       } else if (art.sceneType === 'lighthouse') {
-        ctx.fillStyle = 'rgba(254, 249, 195, 0.25)';
+        ctx.fillStyle = '#0f294a';
+        ctx.fillRect(0, 232, 640, 100);
+        ctx.strokeStyle = 'rgba(147, 197, 253, 0.35)'; ctx.lineWidth = 2;
+        for (let w = 0; w < 5; w++) {
+          ctx.beginPath();
+          ctx.moveTo(20 + w * 40, 252 + w * 12);
+          ctx.quadraticCurveTo(180 + w * 35, 245 + w * 12, 340 + w * 40, 254 + w * 12);
+          ctx.stroke();
+        }
+        const beam = ctx.createLinearGradient(320, 118, 640, 118);
+        beam.addColorStop(0, 'rgba(254, 249, 195, 0.72)');
+        beam.addColorStop(1, 'rgba(254, 249, 195, 0.02)');
+        ctx.fillStyle = beam;
         ctx.beginPath();
-        ctx.moveTo(320, 130);
-        ctx.lineTo(640, 50);
-        ctx.lineTo(640, 210);
-        ctx.closePath();
-        ctx.fill();
+        ctx.moveTo(334, 112); ctx.lineTo(640, 32); ctx.lineTo(640, 205); ctx.lineTo(334, 128);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath(); ctx.moveTo(240, 305); ctx.lineTo(285, 245); ctx.lineTo(360, 248); ctx.lineTo(410, 305); ctx.closePath(); ctx.fill();
         ctx.fillStyle = '#f8fafc';
-        ctx.fillRect(302, 130, 36, 160);
-        ctx.fillStyle = '#ef4444';
-        ctx.fillRect(302, 175, 36, 32);
+        ctx.beginPath(); ctx.moveTo(304, 126); ctx.lineTo(336, 126); ctx.lineTo(346, 252); ctx.lineTo(294, 252); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#dc2626';
+        ctx.fillRect(301, 154, 38, 22);
+        ctx.fillRect(297, 200, 46, 24);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(306, 104, 28, 22);
+        ctx.fillStyle = '#b91c1c';
+        ctx.beginPath(); ctx.moveTo(298, 104); ctx.lineTo(320, 82); ctx.lineTo(342, 104); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.moveTo(475, 272); ctx.lineTo(525, 272); ctx.lineTo(512, 286); ctx.lineTo(488, 286); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(500, 246); ctx.lineTo(516, 270); ctx.lineTo(486, 270); ctx.closePath(); ctx.fill();
       } else if (art.sceneType === 'schoolyard' || art.sceneType === 'outdoor_class') {
-        ctx.fillStyle = '#78350f';
-        ctx.fillRect(175, 185, 22, 110);
-        ctx.fillStyle = '#f43f5e';
-        ctx.beginPath();
-        ctx.arc(186, 165, 68, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = '#fef3c7';
+        ctx.fillRect(280, 178, 270, 120);
+        ctx.fillStyle = '#b91c1c';
+        ctx.beginPath(); ctx.moveTo(262, 180); ctx.lineTo(415, 134); ctx.lineTo(568, 180); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#0369a1';
+        for (let wx = 304; wx <= 504; wx += 48) {
+          ctx.fillRect(wx, 198, 28, 36);
+          ctx.fillRect(wx, 246, 28, 36);
+        }
+        ctx.fillStyle = '#5c2d0c';
+        ctx.fillRect(156, 175, 24, 130);
+        ctx.beginPath(); ctx.moveTo(168, 200); ctx.lineTo(118, 165); ctx.lineWidth = 10; ctx.strokeStyle = '#5c2d0c'; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(168, 195); ctx.lineTo(222, 162); ctx.stroke();
+        [[168, 138, 66, '#dc2626'], [114, 154, 48, '#ef4444'], [222, 152, 50, '#f43f5e'], [165, 114, 44, '#fb7185'], [142, 158, 36, '#15803d'], [196, 164, 34, '#16a34a']].forEach(([x, y, r, c]) => {
+          ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+        });
+        ctx.fillStyle = '#fda4af';
+        for (let p = 0; p < 14; p++) {
+          ctx.beginPath(); ctx.ellipse(90 + p * 36, 225 + (p % 3) * 22, 5, 2.5, 0.5, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (art.sceneType === 'classroom') {
+        ctx.fillStyle = '#065f46';
+        ctx.fillRect(110, 72, 420, 176);
+        ctx.strokeStyle = '#d97706'; ctx.lineWidth = 8;
+        ctx.strokeRect(110, 72, 420, 176);
+        ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        ctx.font = 'italic 700 24px Inter, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('“Tiên Học Lễ — Hậu Học Văn”', 320, 145);
+        ctx.font = '600 18px Inter, sans-serif';
+        ctx.fillStyle = '#a7f3d0';
+        ctx.fillText('Tri Ân Ngày Nhà Giáo 20/11', 320, 190);
+        const ray = ctx.createLinearGradient(60, 40, 380, 290);
+        ray.addColorStop(0, 'rgba(254,249,195,0.28)'); ray.addColorStop(1, 'rgba(254,249,195,0)');
+        ctx.fillStyle = ray;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(190, 0); ctx.lineTo(440, 305); ctx.lineTo(140, 305); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#78350f'; ctx.fillRect(140, 268, 360, 38);
+        ctx.fillStyle = '#fffbeb';
+        ctx.beginPath(); ctx.moveTo(320, 250); ctx.quadraticCurveTo(265, 232, 220, 248); ctx.lineTo(220, 282); ctx.quadraticCurveTo(265, 268, 320, 286); ctx.quadraticCurveTo(375, 268, 420, 282); ctx.lineTo(420, 248); ctx.quadraticCurveTo(375, 232, 320, 250); ctx.fill();
+      } else if (art.sceneType === 'gratitude_moment') {
+        for (let b = 0; b < 18; b++) {
+          ctx.fillStyle = `rgba(254, 240, 138, ${0.12 + (b % 3) * 0.06})`;
+          ctx.beginPath(); ctx.arc(60 + (b * 37) % 520, 45 + (b * 53) % 230, 8 + (b % 4) * 5, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#fda4af';
+        ctx.beginPath(); ctx.moveTo(255, 165); ctx.lineTo(385, 165); ctx.lineTo(336, 295); ctx.lineTo(304, 295); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#facc15'; ctx.fillRect(301, 248, 38, 12);
+        const blooms = [
+          [320, 128, 30, '#f43f5e'], [278, 146, 26, '#facc15'], [362, 146, 26, '#fb7185'],
+          [296, 112, 22, '#f97316'], [346, 112, 22, '#ffffff'], [320, 160, 24, '#e11d48']
+        ];
+        blooms.forEach(([bx, by, br, bc]) => {
+          ctx.fillStyle = bc; ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.beginPath(); ctx.arc(bx - br * 0.25, by - br * 0.25, br * 0.35, 0, Math.PI * 2); ctx.fill();
+        });
       } else {
+        ctx.fillStyle = 'rgba(30, 27, 75, 0.55)';
+        ctx.beginPath(); ctx.moveTo(0, 265); ctx.quadraticCurveTo(180, 190, 360, 250); ctx.quadraticCurveTo(510, 195, 640, 255); ctx.lineTo(640, 310); ctx.lineTo(0, 310); ctx.closePath(); ctx.fill();
         ctx.fillStyle = '#fef9c3';
         ctx.beginPath();
-        ctx.moveTo(320, 240);
-        ctx.quadraticCurveTo(250, 210, 195, 232);
-        ctx.lineTo(195, 275);
-        ctx.quadraticCurveTo(250, 255, 320, 282);
-        ctx.quadraticCurveTo(390, 255, 445, 275);
-        ctx.lineTo(445, 232);
-        ctx.quadraticCurveTo(390, 210, 320, 240);
-        ctx.fill();
+        ctx.moveTo(320, 232); ctx.quadraticCurveTo(248, 198, 190, 222); ctx.lineTo(190, 270);
+        ctx.quadraticCurveTo(248, 248, 320, 278); ctx.quadraticCurveTo(392, 248, 450, 270);
+        ctx.lineTo(450, 222); ctx.quadraticCurveTo(392, 198, 320, 232); ctx.fill();
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+        [[210, 128, 18], [260, 102, 22], [355, 92, 20], [415, 122, 16]].forEach(([dx, dy, s]) => {
+          ctx.beginPath(); ctx.moveTo(dx - s, dy); ctx.quadraticCurveTo(dx - s * 0.4, dy - s * 0.5, dx, dy); ctx.quadraticCurveTo(dx + s * 0.4, dy - s * 0.5, dx + s, dy); ctx.stroke();
+        });
       }
       ctx.restore();
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
-      ctx.fillRect(24, 305, 592, 92);
-      ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(24, 305, 592, 92);
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.80)';
+      ctx.fillRect(22, 306, 596, 94);
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.60)';
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(22, 306, 596, 94);
 
       ctx.fillStyle = '#fef08a';
       ctx.font = '800 26px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(art.title || 'Tri Ân 20/11', 320, 344, 560);
+      ctx.fillText(art.title || 'Tri Ân 20/11', 320, 346, 560);
 
-      ctx.fillStyle = 'rgba(255,255,255,0.88)';
-      ctx.font = '600 15px Inter, sans-serif';
+      ctx.fillStyle = 'rgba(241, 245, 249, 0.90)';
+      ctx.font = '600 14px Inter, sans-serif';
       ctx.fillText('Triển Lãm Nghệ Thuật Chào Mừng Ngày Nhà Giáo Việt Nam 20/11', 320, 378);
 
-      return canvas.toDataURL('image/png');
+      return canvas;
+    }
+
+    function createArtCanvasDataURL(art) {
+      return renderArtToCanvas(art).toDataURL('image/png');
+    }
+
+    function getArtCanvasTexture(art) {
+      const key = 'art_tex_v10_' + (art.sceneType || '') + '_' + (art.title || '');
+      if (TEXTURE_CACHE[key]) return TEXTURE_CACHE[key];
+      const tex = new THREE.CanvasTexture(renderArtToCanvas(art));
+      tex.encoding = THREE.sRGBEncoding;
+      tex.generateMipmaps = true;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      if (renderer && renderer.capabilities) {
+        tex.anisotropy = Math.min(graphicsUltra ? 12 : 6, renderer.capabilities.getMaxAnisotropy());
+      }
+      TEXTURE_CACHE[key] = tex;
+      return tex;
+    }
+
+    function createWallNewspaperTexture() {
+      return makeCanvasTexture('wall_newspaper_20_11_v10', 1024, 660, (ctx, w, h) => {
+        // Warm cream art paper background
+        const bg = ctx.createLinearGradient(0, 0, w, h);
+        bg.addColorStop(0, '#fffbeb');
+        bg.addColorStop(1, '#fef3c7');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, w, h);
+        // Festive crimson & gold border
+        ctx.strokeStyle = '#991b1b';
+        ctx.lineWidth = 18;
+        ctx.strokeRect(14, 14, w - 28, h - 28);
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(28, 28, w - 56, h - 56);
+        // Header masthead banner
+        ctx.fillStyle = '#991b1b';
+        ctx.fillRect(46, 46, w - 92, 112);
+        ctx.fillStyle = '#fef08a';
+        ctx.textAlign = 'center';
+        ctx.font = '800 44px Inter, sans-serif';
+        ctx.fillText('BÁO TƯỜNG TRI ÂN 20/11', w / 2, 102);
+        ctx.fillStyle = '#fde68a';
+        ctx.font = '600 22px Inter, sans-serif';
+        ctx.fillText('Chủ đề: “NGƯỜI LÁI ĐÒ THẦM LẶNG” • Số Đặc Biệt', w / 2, 140);
+        // Left column: Poem box
+        ctx.fillStyle = '#fff1f2';
+        ctx.fillRect(52, 180, 440, 410);
+        ctx.strokeStyle = '#fb7185'; ctx.lineWidth = 3;
+        ctx.strokeRect(52, 180, 440, 410);
+        ctx.fillStyle = '#be123c';
+        ctx.font = '800 24px Inter, sans-serif';
+        ctx.fillText('BỤI PHẤN THÂN THƯƠNG', 272, 224);
+        ctx.fillStyle = '#334155';
+        ctx.font = 'italic 600 20px Inter, sans-serif';
+        ['Có một nghề bụi phấn bám đầy tay', 'Người ta bảo đó là nghề trong sạch nhất', 'Có một nghề không trồng cây vào đất', 'Mà mang lại cho đời đầy trái ngọt hoa tươi.'].forEach((line, i) => {
+          ctx.fillText(line, 272, 288 + i * 52, 405);
+        });
+        ctx.fillStyle = '#e11d48';
+        ctx.font = '700 18px Inter, sans-serif';
+        ctx.fillText('✿ Nhấn để đọc trọn bài báo tường ✿', 272, 550);
+        // Right column: Floral artwork & tribute message
+        ctx.fillStyle = '#f0fdf4';
+        ctx.fillRect(522, 180, 450, 410);
+        ctx.strokeStyle = '#34d399'; ctx.lineWidth = 3;
+        ctx.strokeRect(522, 180, 450, 410);
+        // Painted sun & flower wreath
+        const rad = ctx.createRadialGradient(747, 305, 8, 747, 305, 82);
+        rad.addColorStop(0, '#fde047'); rad.addColorStop(1, 'rgba(253,224,71,0)');
+        ctx.fillStyle = rad; ctx.beginPath(); ctx.arc(747, 305, 82, 0, Math.PI * 2); ctx.fill();
+        for (let k = 0; k < 7; k++) {
+          const a = (k / 7) * Math.PI * 2;
+          ctx.fillStyle = k % 2 === 0 ? '#f43f5e' : '#fb923c';
+          ctx.beginPath(); ctx.arc(747 + Math.cos(a) * 44, 305 + Math.sin(a) * 44, 22, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(747, 305, 22, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#065f46';
+        ctx.font = '800 24px Inter, sans-serif';
+        ctx.fillText('TÔN SƯ TRỌNG ĐẠO', 747, 445);
+        ctx.fillStyle = '#334155';
+        ctx.font = '600 19px Inter, sans-serif';
+        ctx.fillText('Kính chúc Quý Thầy Cô luôn mạnh khỏe,', 747, 492, 410);
+        ctx.fillText('hạnh phúc và vững tay chèo tri thức!', 747, 526, 410);
+      });
     }
 
     function createContactShadow(radiusX = 0.36, radiusZ = 0.36, opacity = 0.34) {
@@ -1536,154 +1790,9 @@
       return group;
     }
 
-    // Smooth skinned humanoids (CC0) loaded only where animated characters
-    // are supported; existing procedural bodies remain as an automatic fallback.
-    // Sources: https://tevy.dev/models/casual-walker and /models/hiker
-    const AVATAR_ASSETS = {
-      male: 'https://tevy.dev/models/casual-walker/v1/',
-      female: 'https://tevy.dev/models/hiker/v1/'
-    };
-    let humanoidLoader = null;
-    const humanoidAssetPromises = new Map();
-    let enhancedHumanoids = [];
-
-    function getHumanoidLoader() {
-      if (humanoidLoader) return humanoidLoader;
-      if (!renderer || !THREE.GLTFLoader || !THREE.KTX2Loader ||
-          !THREE.SkeletonUtils || !THREE.SkeletonUtils.clone ||
-          !window.MeshoptDecoder) return null;
-      try {
-        const ktx = new THREE.KTX2Loader()
-          .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/basis/')
-          .detectSupport(renderer);
-        humanoidLoader = new THREE.GLTFLoader();
-        humanoidLoader.setKTX2Loader(ktx);
-        humanoidLoader.setMeshoptDecoder(window.MeshoptDecoder);
-        return humanoidLoader;
-      } catch (error) {
-        console.warn('GLB avatar decoder unavailable; keeping original human models.', error);
-        return null;
-      }
-    }
-
-    function getEnhancedHumanAsset(gender, highDetail) {
-      const loader = getHumanoidLoader();
-      if (!loader) return null;
-      const url = (AVATAR_ASSETS[gender] || AVATAR_ASSETS.male) + (highDetail ? 'lod0.glb' : 'lod1.glb');
-      if (!humanoidAssetPromises.has(url)) {
-        humanoidAssetPromises.set(url, new Promise((resolve,reject) => {
-          loader.load(url, resolve, undefined, reject);
-        }).catch(error => {
-          console.warn('Character GLB could not be loaded; procedural fallback retained:', url, error);
-          return null;
-        }));
-      }
-      return humanoidAssetPromises.get(url);
-    }
-
-    function upgradeStandingHuman(root, options) {
-      // Sit animations are a separate rig requirement; do not force a walking
-      // avatar onto a chair or it will recreate the distorted-leg bug.
-      if (options.isSeated || options.role === 'reader') return;
-      const asset = getEnhancedHumanAsset(options.gender, options.role === 'teacher' || options.hasBouquet);
-      if (!asset) return;
-      asset.then(gltf => {
-        // Skip models from previous scenes already torn down by a room switch.
-        if (!gltf || !root.parent || !root.userData) return;
-        try {
-          const body = THREE.SkeletonUtils.clone(gltf.scene);
-          const bounds = new THREE.Box3().setFromObject(body);
-          const height = bounds.max.y - bounds.min.y;
-          const scale = height > 0.5 ? 1.70/height : 1;
-          body.scale.setScalar(scale);
-          body.position.y = -bounds.min.y*scale;
-          body.traverse(obj => {
-            if (obj.isMesh) {
-              obj.castShadow = true;
-              obj.receiveShadow = true;
-              if (obj.material) {
-                // Keep the original material's textures, with restrained shine.
-                const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-                materials.forEach(mat => {
-                  if (mat.roughness !== undefined) mat.roughness = Math.max(0.48, mat.roughness);
-                });
-              }
-              // A backpack is inappropriate in a teacher/student ceremony.
-              if (/backpack|rucksack|hiking_pack/i.test(obj.name)) obj.visible=false;
-            }
-          });
-          // Preserve click interactions when switching from procedural to GLB.
-          let interaction = null;
-          root.traverse(obj => {
-            if (!interaction && obj.isMesh && obj.userData.interactiveType) {
-              interaction = obj.userData.interactiveType;
-            }
-          });
-          const bouquet = root.userData.bouquetMesh;
-          const originalChildren = [...root.children];
-          const hand = body.getObjectByName('hand_R') || body.getObjectByName('Hand_R') ||
-            body.getObjectByName('RightHand') || body.getObjectByName('mixamorigRightHand');
-          if (bouquet) {
-            if (hand) {
-              hand.add(bouquet);
-              bouquet.position.set(0.01, -0.13, 0.065);
-              bouquet.rotation.set(-0.4, 0.05, 0.18);
-              bouquet.scale.setScalar(0.78);
-            } else {
-              body.add(bouquet);
-              bouquet.position.set(-0.20,1.05,0.26);
-              bouquet.rotation.set(-0.3,0,0.1);
-              bouquet.scale.setScalar(0.78);
-            }
-          }
-          originalChildren.forEach(child => { if (!child.userData?.keepWithEnhanced) child.visible=false; });
-          root.add(body);
-          if (interaction) {
-            body.traverse(obj => {
-              if (!obj.isMesh) return;
-              obj.userData.interactiveType=interaction;
-              if (root.parent && root.parent.visible) interactiveList.push(obj);
-            });
-          }
-
-          const mixer = new THREE.AnimationMixer(body);
-          const getClip = key => gltf.animations.find(clip => clip.name.toLowerCase() === key);
-          const idleClip = getClip('idle');
-          const walkClip = getClip('walk');
-          const idle = idleClip ? mixer.clipAction(idleClip) : null;
-          const walk = walkClip ? mixer.clipAction(walkClip) : null;
-          if (idle) { idle.play(); idle.setEffectiveWeight(1); }
-          if (walk) { walk.play(); walk.timeScale=1.45; walk.setEffectiveWeight(0); }
-          let upperRight=null;
-          body.traverse(obj => {
-            if (obj.isBone && !upperRight &&
-                /(?:upper.?arm.?r|right.?upper.?arm|arm.?upper.?r)/i.test(obj.name)) upperRight=obj;
-          });
-          root.userData.enhancedBody = body;
-          enhancedHumanoids.push({root,mixer,idle,walk,upperRight});
-        } catch (error) {
-          console.warn('Enhanced avatar failed to initialize; original character kept.', error);
-        }
-      });
-    }
-
-    function updateEnhancedHumanoids(dt) {
-      enhancedHumanoids = enhancedHumanoids.filter(item=>!!item.root.parent);
-      enhancedHumanoids.forEach(item=>{
-        let visible=true, ptr=item.root;
-        while(ptr){if(!ptr.visible){visible=false;break;}ptr=ptr.parent;}
-        if(!visible) return;
-        const weight=THREE.MathUtils.clamp(item.root.userData.walkBlend || 0,0,1);
-        if(item.idle) item.idle.setEffectiveWeight(1-weight);
-        if(item.walk) item.walk.setEffectiveWeight(weight);
-        item.mixer.update(dt);
-        // A limited upper-arm gesture tracks the existing bouquet choreography.
-        if (item.upperRight && item.root.userData.rightArm) {
-          const originalAngle=item.root.userData.rightArm.rotation.x;
-          if (Math.abs(originalAngle)>0.22 && weight<0.25) item.upperRight.rotation.x+=originalAngle*0.48;
-        }
-      });
-    }
+    // Procedural stylized Vietnamese school & teacher characters (V10):
+    // Cleanly sculpted faces, natural hair clearance, school uniforms, and traditional Ao Dai.
+    function updateEnhancedHumanoids() { /* procedural avatars animate directly via joints */ }
 
     function createRealisticHuman(opts = {}) {
       const {
@@ -1691,195 +1800,316 @@
         role = 'student',
         shirtColor = 0xffffff,
         pantsColor = 0x1e293b,
-        hairColor = 0x18181b,
-        skinColor = 0xf8d0b8,
+        hairColor = 0x1c1917,
+        skinColor = 0xf7ceb4,
         hasBouquet = false,
-        isSeated = false,
-        keepOriginalAppearance = false
+        isSeated = false
       } = opts;
 
       const root = new THREE.Group();
-      root.add(createContactShadow(0.32, 0.32, 0.34));
-      const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.62, metalness: 0.0 });
-      const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.66, metalness: 0.02 });
-      const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.76, metalness: 0.01 });
-      const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.72, metalness: 0.02 });
-      const shoeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.50, metalness: 0.08 });
-      const soleMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.58 });
-      const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.18, metalness: 0 });
-      const irisMat = new THREE.MeshStandardMaterial({ color: 0x241c16, roughness: 0.40, metalness: 0 });
-      const lipMat = new THREE.MeshStandardMaterial({ color: 0xbe123c, roughness: 0.52, metalness: 0 });
-      const eyelidMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.72, metalness: 0 });
+      root.add(createContactShadow(0.32, 0.32, 0.32));
+
+      const isAoDai = role === 'teacher' && gender === 'female';
+      const isMaleTeacher = role === 'teacher' && gender === 'male';
+      const isFemaleStudent = gender === 'female' && (role === 'student' || role === 'reader');
+
+      const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.62, metalness: 0.0, envMapIntensity: 0.25 });
+      const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.68, metalness: 0.02, envMapIntensity: 0.28 });
+      const whiteShirtMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.66, metalness: 0.01, envMapIntensity: 0.28 });
+      const pantsMat = new THREE.MeshStandardMaterial({
+        color: isAoDai ? 0xfff7ed : pantsColor,
+        roughness: isAoDai ? 0.56 : 0.78,
+        metalness: 0.01,
+        envMapIntensity: 0.25
+      });
+      const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.72, metalness: 0.04, envMapIntensity: 0.20 });
+      const shoeMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.45, metalness: 0.08, envMapIntensity: 0.35 });
+      const soleMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.60, envMapIntensity: 0.25 });
+      const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.16, metalness: 0, envMapIntensity: 0.2 });
+      const irisMat = new THREE.MeshStandardMaterial({ color: 0x1a120d, roughness: 0.28, metalness: 0, envMapIntensity: 0.2 });
+      const lipMat = new THREE.MeshStandardMaterial({ color: gender === 'female' ? 0xd9466a : 0xc26565, roughness: 0.46, metalness: 0, envMapIntensity: 0.2 });
+      const blushMat = new THREE.MeshBasicMaterial({ color: 0xf9a8b8, transparent: true, opacity: gender === 'female' ? 0.32 : 0.18, depthWrite: false });
 
       const hipY = isSeated ? 0.52 : 0.85;
 
-      const pelvis = new THREE.Mesh(new THREE.CylinderGeometry(0.142, 0.152, 0.16, 18), pantsMat);
+      // Pelvis / Waist / Skirt
+      const pelvis = new THREE.Mesh(
+        new THREE.CylinderGeometry(isFemaleStudent ? 0.140 : 0.145, isFemaleStudent ? 0.195 : 0.152, isFemaleStudent ? 0.26 : 0.16, 18),
+        pantsMat
+      );
       pelvis.scale.set(1.06, 1, 0.86);
-      pelvis.position.y = hipY;
+      pelvis.position.y = isFemaleStudent ? hipY - 0.04 : hipY;
       pelvis.castShadow = true;
       root.add(pelvis);
 
+      // Torso (slim athletic silhouette)
       const torso = new THREE.Mesh(
-        new THREE.CylinderGeometry(gender === 'female' ? 0.158 : 0.172, 0.138, 0.46, 20),
+        new THREE.CylinderGeometry(gender === 'female' ? 0.152 : 0.168, gender === 'female' ? 0.128 : 0.140, 0.45, 20),
         shirtMat
       );
-      torso.scale.set(1.06, 1, 0.80);
-      torso.position.y = hipY + 0.3;
+      torso.scale.set(1.06, 1, 0.78);
+      torso.position.y = hipY + 0.295;
       torso.castShadow = true;
       root.add(torso);
 
+      // Rounded chest cap & shoulders
+      const chestCap = new THREE.Mesh(new THREE.SphereGeometry(gender === 'female' ? 0.154 : 0.168, 18, 12), shirtMat);
+      chestCap.scale.set(1.06, 0.36, 0.78);
+      chestCap.position.y = hipY + 0.495;
+      root.add(chestCap);
+
       [-1, 1].forEach(side => {
-        const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.072, 14, 10), shirtMat);
-        shoulder.scale.set(0.95, 0.78, 0.82);
-        shoulder.position.set(side * 0.17, hipY + 0.475, 0);
+        const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.068, 14, 10), shirtMat);
+        shoulder.scale.set(0.95, 0.82, 0.82);
+        shoulder.position.set(side * (gender === 'female' ? 0.162 : 0.175), hipY + 0.472, 0);
         root.add(shoulder);
       });
 
-      const chestCap = new THREE.Mesh(new THREE.SphereGeometry(0.165, 18, 12), shirtMat);
-      chestCap.scale.set(1.08, 0.38, 0.80);
-      chestCap.position.y = hipY + 0.5;
-      root.add(chestCap);
-
-      const collar = new THREE.Mesh(
-        new THREE.TorusGeometry(0.082, 0.017, 10, 20),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 })
-      );
-      collar.rotation.x = Math.PI / 2 + 0.12;
-      collar.position.set(0, hipY + 0.52, 0.01);
-      root.add(collar);
-
-      if (role === 'mc' || role === 'student') {
-        const scarf = new THREE.Mesh(
-          new THREE.ConeGeometry(0.088, 0.25, 8),
-          new THREE.MeshStandardMaterial({ color: role === 'mc' ? 0xdc2626 : 0x2563eb, roughness: 0.45 })
+      // Outfit details by Vietnamese 20/11 role
+      if (isAoDai) {
+        // Traditional Vietnamese Ao Dai mandarin collar, brooch & flowing front/back tunic panels
+        const mandarinCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.074, 0.055, 16), shirtMat);
+        mandarinCollar.position.set(0, hipY + 0.535, 0.005);
+        root.add(mandarinCollar);
+        const goldBrooch = new THREE.Mesh(
+          new THREE.SphereGeometry(0.022, 10, 10),
+          new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.78, roughness: 0.24 })
         );
-        scarf.rotation.x = Math.PI - 0.1;
-        scarf.position.set(0, hipY + 0.39, 0.132);
-        root.add(scarf);
-      } else if (role === 'teacher') {
-        const tie = new THREE.Mesh(
-          new THREE.ConeGeometry(0.028, 0.26, 6),
-          new THREE.MeshStandardMaterial({ color: gender === 'female' ? 0xfacc15 : 0xdc2626, roughness: 0.35 })
+        goldBrooch.scale.set(1.1, 1.1, 0.5);
+        goldBrooch.position.set(-0.075, hipY + 0.42, 0.126);
+        root.add(goldBrooch);
+        const sash = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.135, 0.138, 0.036, 18),
+          new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.42, metalness: 0.25 })
         );
-        tie.rotation.x = Math.PI;
-        tie.position.set(0, hipY + 0.35, 0.142);
-        root.add(tie);
+        sash.scale.set(1.06, 1, 0.80);
+        sash.position.set(0, hipY + 0.085, 0);
+        root.add(sash);
+        if (!isSeated) {
+          // Graceful front & back flowing silk Ao Dai flaps
+          const flapFront = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.52, 0.022), shirtMat);
+          flapFront.position.set(0, hipY - 0.19, 0.126);
+          flapFront.rotation.x = -0.05;
+          flapFront.castShadow = true;
+          const flapBack = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.52, 0.022), shirtMat);
+          flapBack.position.set(0, hipY - 0.19, -0.122);
+          flapBack.rotation.x = 0.05;
+          flapBack.castShadow = true;
+          root.add(flapFront, flapBack);
+        }
+      } else if (isMaleTeacher) {
+        // Tailored teacher suit blazer with crisp white shirt V-front & silk tie
+        const vShirt = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.24, 0.024), whiteShirtMat);
+        vShirt.position.set(0, hipY + 0.39, 0.125);
+        root.add(vShirt);
+        const tieMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.42, envMapIntensity: 0.25 });
+        const tieKnot = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.036, 0.026), tieMat);
+        tieKnot.position.set(0, hipY + 0.485, 0.136);
+        const tieBlade = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.22, 0.016), tieMat);
+        tieBlade.position.set(0, hipY + 0.365, 0.138);
+        root.add(tieKnot, tieBlade);
+        [-1, 1].forEach(s => {
+          const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.24, 0.024), shirtMat);
+          lapel.position.set(s * 0.068, hipY + 0.39, 0.130);
+          lapel.rotation.z = s * 0.16;
+          root.add(lapel);
+        });
+      } else {
+        // Student / MC crisp shirt collar & neat flush red pioneer scarf / school ribbon
+        const collar = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.014, 10, 20), whiteShirtMat);
+        collar.rotation.x = Math.PI / 2 + 0.1;
+        collar.position.set(0, hipY + 0.515, 0.008);
+        root.add(collar);
+        const scarfColor = role === 'mc' ? 0xfacc15 : 0xdc2626;
+        const scarfMat = new THREE.MeshStandardMaterial({ color: scarfColor, roughness: 0.55, envMapIntensity: 0.2 });
+        // Flat collar wrap + tidy triangular knot resting flush on chest (never sticking out)
+        const scarfWrap = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.014, 8, 18), scarfMat);
+        scarfWrap.rotation.x = Math.PI / 2 + 0.14;
+        scarfWrap.position.set(0, hipY + 0.502, 0.012);
+        const scarfKnot = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.034, 0.022), scarfMat);
+        scarfKnot.position.set(0, hipY + 0.455, 0.132);
+        const scarfTailL = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.14, 0.012), scarfMat);
+        scarfTailL.position.set(-0.018, hipY + 0.375, 0.133);
+        scarfTailL.rotation.z = -0.14;
+        const scarfTailR = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.14, 0.012), scarfMat);
+        scarfTailR.position.set(0.018, hipY + 0.375, 0.133);
+        scarfTailR.rotation.z = 0.14;
+        root.add(scarfWrap, scarfKnot, scarfTailL, scarfTailR);
       }
 
-      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.058, 0.12, 16), skinMat);
-      neck.position.y = hipY + 0.565;
+      // Neck
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.056, 0.11, 16), skinMat);
+      neck.position.y = hipY + 0.562;
       root.add(neck);
 
+      // Head Group (100% unobstructed warm expressive face!)
       const headGroup = new THREE.Group();
-      headGroup.position.y = hipY + 0.715;
+      headGroup.position.y = hipY + 0.71;
       root.add(headGroup);
 
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.152, 24, 24), skinMat);
-      head.scale.set(0.9, 1.04, 0.92);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.148, 24, 24), skinMat);
+      head.scale.set(0.92, 1.04, 0.95);
       head.castShadow = true;
       headGroup.add(head);
 
-      [-0.05, 0.05].forEach((ex) => {
-        const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.0155, 14, 14), eyeWhiteMat);
-        eyeWhite.scale.set(1.1, 0.62, 0.6);
-        eyeWhite.position.set(ex, 0.016, 0.136);
+      // Eyes, eyebrows, blush & warm smile
+      [-0.046, 0.046].forEach((ex) => {
+        const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.017, 14, 14), eyeWhiteMat);
+        eyeWhite.scale.set(1.12, 0.82, 0.45);
+        eyeWhite.position.set(ex, 0.012, 0.135);
         headGroup.add(eyeWhite);
 
-        const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0092, 12, 12), irisMat);
-        iris.position.set(ex, 0.016, 0.147);
+        const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0115, 12, 12), irisMat);
+        iris.scale.set(1.0, 1.0, 0.55);
+        iris.position.set(ex, 0.011, 0.141);
         headGroup.add(iris);
 
-        const upperLid = new THREE.Mesh(new THREE.BoxGeometry(0.031, 0.007, 0.016), eyelidMat);
-        upperLid.position.set(ex, 0.028, 0.138);
-        upperLid.rotation.z = ex * -0.4;
-        headGroup.add(upperLid);
-
-        const catchlight = new THREE.Mesh(new THREE.SphereGeometry(0.0036, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-        catchlight.position.set(ex + 0.003, 0.021, 0.152);
+        const catchlight = new THREE.Mesh(new THREE.SphereGeometry(0.0038, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        catchlight.position.set(ex + 0.004, 0.016, 0.146);
         headGroup.add(catchlight);
-      });
 
-      // Ears, subtle eyebrows and nose add readable human anatomy without textures.
-      [-1,1].forEach(side => {
-        const ear = new THREE.Mesh(new THREE.SphereGeometry(0.031,12,10),skinMat);
-        ear.scale.set(0.48,1,0.67);
-        ear.position.set(side*0.149,-0.015,0.008);
-        headGroup.add(ear);
-        const brow = new THREE.Mesh(new THREE.BoxGeometry(0.039,0.005,0.006),hairMat);
-        brow.position.set(side*0.054,0.05,0.139);
-        brow.rotation.z=side*.065;
+        const brow = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.006, 0.006), hairMat);
+        brow.position.set(ex, 0.044, 0.137);
+        brow.rotation.z = ex < 0 ? 0.08 : -0.08;
         headGroup.add(brow);
+
+        const blush = new THREE.Mesh(new THREE.CircleGeometry(0.022, 14), blushMat);
+        blush.position.set(ex * 1.48, -0.022, 0.128);
+        blush.rotation.y = ex < 0 ? -0.35 : 0.35;
+        headGroup.add(blush);
       });
-      const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.136, 20, 16), skinMat);
-      jaw.scale.set(0.95, 0.52, 0.84);
-      jaw.position.set(0, -0.088, 0.01);
-      headGroup.add(jaw);
 
-      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.021, 12, 10), skinMat);
-      nose.scale.set(0.5, 0.68, 0.98);
-      nose.position.set(0, -0.008, 0.148);
-      headGroup.add(nose);
-      const smile = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.0038, 8, 16, Math.PI), lipMat);
-      smile.rotation.x = Math.PI;
-      smile.position.set(0, -0.05, 0.136);
-      headGroup.add(smile);
-
-      const chin = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), skinMat);
-      chin.scale.set(0.8, 0.58, 0.7);
-      chin.position.set(0, -0.082, 0.115);
-      headGroup.add(chin);
-
-      const hairCap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.166, 24, 24, 0, Math.PI * 2, 0, Math.PI * 0.67), hairMat
-      );
-      hairCap.position.set(0, 0.018, -0.008);
-      headGroup.add(hairCap);
-
-      const fringe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.038, 0.04), hairMat);
-      fringe.position.set(0, 0.082, 0.115);
-      fringe.rotation.x = -0.16;
-      headGroup.add(fringe);
-
-      if (gender === 'female') {
-        const backHair = new THREE.Mesh(new THREE.CylinderGeometry(0.142, 0.17, 0.34, 18), hairMat);
-        backHair.position.set(0, -0.085, -0.055);
-        headGroup.add(backHair);
-        [-1, 1].forEach(side => {
-          const sideLock = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.018, 0.18, 10), hairMat);
-          sideLock.position.set(side * 0.105, -0.01, 0.085);
-          sideLock.rotation.z = side * 0.16;
-          sideLock.rotation.x = 0.2;
-          headGroup.add(sideLock);
+      // Subtle glasses for male teachers
+      if (isMaleTeacher) {
+        const glassFrameMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.72, roughness: 0.25 });
+        [-0.046, 0.046].forEach(gx => {
+          const rim = new THREE.Mesh(new THREE.TorusGeometry(0.024, 0.0032, 8, 18), glassFrameMat);
+          rim.position.set(gx, 0.012, 0.146);
+          headGroup.add(rim);
         });
-
-        const hairRibbon = new THREE.Mesh(
-          new THREE.BoxGeometry(0.055, 0.028, 0.022),
-          new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.35 })
-        );
-        hairRibbon.position.set(0.11, 0.085, 0.065);
-        hairRibbon.rotation.z = -0.35;
-        headGroup.add(hairRibbon);
+        const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.004, 0.004), glassFrameMat);
+        bridge.position.set(0, 0.015, 0.146);
+        headGroup.add(bridge);
       }
 
+      // Ears
+      [-1, 1].forEach(side => {
+        const ear = new THREE.Mesh(new THREE.SphereGeometry(0.027, 12, 10), skinMat);
+        ear.scale.set(0.45, 1.0, 0.65);
+        ear.position.set(side * 0.138, -0.006, 0.002);
+        headGroup.add(ear);
+      });
+
+      // Nose & friendly smile
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.014, 10, 10), skinMat);
+      nose.scale.set(0.75, 0.72, 0.95);
+      nose.position.set(0, -0.010, 0.144);
+      headGroup.add(nose);
+
+      const smile = new THREE.Mesh(new THREE.TorusGeometry(0.021, 0.0042, 8, 18, Math.PI), lipMat);
+      smile.rotation.x = Math.PI;
+      smile.position.set(0, -0.042, 0.134);
+      headGroup.add(smile);
+
+      // Sculpted Hair — strictly behind/above the face plane (ZERO face clipping!)
+      const crownHair = new THREE.Mesh(
+        new THREE.SphereGeometry(0.155, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.56),
+        hairMat
+      );
+      crownHair.scale.set(0.95, 1.04, 0.98);
+      crownHair.position.set(0, 0.022, -0.026);
+      crownHair.rotation.x = -0.32;
+      crownHair.castShadow = true;
+      headGroup.add(crownHair);
+
+      // Back skull hair volume
+      const backSkull = new THREE.Mesh(new THREE.SphereGeometry(0.146, 20, 16), hairMat);
+      backSkull.scale.set(0.94, 0.96, 0.72);
+      backSkull.position.set(0, -0.012, -0.068);
+      headGroup.add(backSkull);
+
+      // Sculpted bangs sitting neatly ABOVE the forehead (y >= 0.088)
+      const bangCenter = new THREE.Mesh(new THREE.SphereGeometry(0.072, 14, 10), hairMat);
+      bangCenter.scale.set(1.55, 0.48, 0.72);
+      bangCenter.position.set(-0.02, 0.106, 0.095);
+      bangCenter.rotation.z = 0.12;
+      headGroup.add(bangCenter);
+
+      const bangSide = new THREE.Mesh(new THREE.SphereGeometry(0.056, 12, 10), hairMat);
+      bangSide.scale.set(1.25, 0.44, 0.68);
+      bangSide.position.set(0.068, 0.098, 0.084);
+      bangSide.rotation.z = -0.22;
+      headGroup.add(bangSide);
+
+      // Side temple hair framing the ears cleanly
+      [-1, 1].forEach(side => {
+        const temple = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.018, 0.11, 10), hairMat);
+        temple.position.set(side * 0.124, 0.028, 0.018);
+        temple.rotation.z = side * 0.12;
+        headGroup.add(temple);
+      });
+
+      if (gender === 'female') {
+        // Graceful flowing long back hair behind shoulders + soft cheek-framing locks
+        const longBack = new THREE.Mesh(new THREE.CylinderGeometry(0.122, 0.148, 0.30, 18), hairMat);
+        longBack.scale.set(1.06, 1, 0.62);
+        longBack.position.set(0, -0.105, -0.088);
+        longBack.castShadow = true;
+        headGroup.add(longBack);
+
+        [-1, 1].forEach(side => {
+          const lock = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.016, 0.21, 10), hairMat);
+          lock.position.set(side * 0.122, -0.048, 0.046);
+          lock.rotation.z = side * 0.08;
+          headGroup.add(lock);
+        });
+
+        // Cute hair bow/ribbon clip placed neatly on upper-right side of hair
+        const ribbonMat = new THREE.MeshStandardMaterial({
+          color: role === 'teacher' ? 0xfacc15 : 0xf43f5e,
+          roughness: 0.38
+        });
+        const bowL = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), ribbonMat);
+        bowL.scale.set(1.2, 0.7, 0.45);
+        bowL.position.set(0.105, 0.105, 0.056);
+        bowL.rotation.z = -0.35;
+        const bowR = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), ribbonMat);
+        bowR.scale.set(1.2, 0.7, 0.45);
+        bowR.position.set(0.132, 0.092, 0.044);
+        bowR.rotation.z = -0.35;
+        headGroup.add(bowL, bowR);
+      }
+
+      // Arms with smooth elbow joints
       function buildArm(side) {
         const shoulderPivot = new THREE.Group();
-        shoulderPivot.position.set(side * 0.205, hipY + 0.48, 0);
+        shoulderPivot.position.set(side * (gender === 'female' ? 0.192 : 0.205), hipY + 0.475, 0);
 
-        const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.044, 0.22, 14), shirtMat);
+        const sleeveLen = (isAoDai || isMaleTeacher) ? 0.39 : 0.22;
+        const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.042, 0.22, 14), shirtMat);
         upperArm.position.y = -0.11;
+        upperArm.castShadow = true;
         shoulderPivot.add(upperArm);
+
+        const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.040, 10, 10), (isAoDai || isMaleTeacher) ? shirtMat : skinMat);
+        elbow.position.y = -0.22;
+        shoulderPivot.add(elbow);
 
         const lowerPivot = new THREE.Group();
         lowerPivot.position.y = -0.22;
         shoulderPivot.add(lowerPivot);
 
-        const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.032, 0.21, 14), skinMat);
-        forearm.position.y = -0.1;
+        const forearm = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.039, 0.031, 0.20, 14),
+          sleeveLen > 0.3 ? shirtMat : skinMat
+        );
+        forearm.position.y = -0.10;
+        forearm.castShadow = true;
         lowerPivot.add(forearm);
 
-        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.041, 10, 10), skinMat);
-        hand.scale.set(0.85, 1.15, 0.65);
-        hand.position.y = -0.21;
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.039, 12, 10), skinMat);
+        hand.scale.set(0.85, 1.12, 0.68);
+        hand.position.y = -0.205;
         lowerPivot.add(hand);
 
         shoulderPivot.userData.lowerPivot = lowerPivot;
@@ -1891,47 +2121,46 @@
       const rightArm = buildArm(-1);
 
       const bouquetMesh = createFlowerBouquet();
-      bouquetMesh.position.set(0, -0.22, 0.08);
+      bouquetMesh.position.set(0, -0.21, 0.08);
       bouquetMesh.rotation.x = 0.45;
       bouquetMesh.visible = hasBouquet;
       rightArm.userData.lowerPivot.add(bouquetMesh);
 
+      // Legs (standing & seated) with rounded shoe toes
       function buildLeg(side) {
-        // Seated legs are modeled directly in local seated coordinates.
-        // This avoids stacking opposing 90-degree hip/knee rotations, which
-        // could visually detach the knees/feet after the avatar turns toward the desk.
+        const legMat = isFemaleStudent ? skinMat : pantsMat;
+        const thighMat = isFemaleStudent ? pantsMat : pantsMat;
         if (isSeated) {
           const seatedLeg = new THREE.Group();
-          seatedLeg.position.set(side * 0.084, hipY - 0.045, 0);
+          seatedLeg.position.set(side * 0.082, hipY - 0.045, 0);
 
-          // Each part meets its neighboring joint: hip -> forward thigh -> knee -> vertical shin -> shoe.
-          const hipJoint = new THREE.Mesh(new THREE.SphereGeometry(0.063, 14, 12), pantsMat);
+          const hipJoint = new THREE.Mesh(new THREE.SphereGeometry(0.060, 14, 12), thighMat);
           hipJoint.position.set(0, 0, 0.02);
           seatedLeg.add(hipJoint);
 
-          const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.063, 0.054, 0.32, 16), pantsMat);
+          const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.060, 0.052, 0.32, 16), thighMat);
           thigh.rotation.x = Math.PI / 2;
           thigh.position.set(0, -0.02, 0.16);
           thigh.castShadow = true;
           seatedLeg.add(thigh);
 
-          const knee = new THREE.Mesh(new THREE.SphereGeometry(0.056, 14, 12), pantsMat);
+          const knee = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 12), legMat);
           knee.position.set(0, -0.04, 0.32);
           knee.castShadow = true;
           seatedLeg.add(knee);
 
-          const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.051, 0.041, 0.34, 16), pantsMat);
+          const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.039, 0.34, 16), legMat);
           shin.position.set(0, -0.22, 0.32);
           shin.castShadow = true;
           seatedLeg.add(shin);
 
-          const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.108, 0.072, 0.215), shoeMat);
-          shoe.position.set(0, -0.39, 0.39);
+          const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.102, 0.068, 0.20), shoeMat);
+          shoe.position.set(0, -0.39, 0.38);
           shoe.castShadow = true;
           seatedLeg.add(shoe);
 
-          const sole = new THREE.Mesh(new THREE.BoxGeometry(0.114, 0.021, 0.225), soleMat);
-          sole.position.set(0, -0.429, 0.394);
+          const sole = new THREE.Mesh(new THREE.BoxGeometry(0.108, 0.020, 0.21), soleMat);
+          sole.position.set(0, -0.428, 0.384);
           seatedLeg.add(sole);
 
           root.add(seatedLeg);
@@ -1940,28 +2169,38 @@
         }
 
         const hipPivot = new THREE.Group();
-        hipPivot.position.set(side * 0.084, hipY - 0.04, 0);
+        hipPivot.position.set(side * 0.082, hipY - 0.04, 0);
 
-        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.067, 0.056, 0.36, 16), pantsMat);
+        const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.063, 0.053, 0.36, 16), thighMat);
         thigh.position.y = -0.18;
         thigh.castShadow = true;
         hipPivot.add(thigh);
+
+        const knee = new THREE.Mesh(new THREE.SphereGeometry(0.049, 12, 10), legMat);
+        knee.position.y = -0.36;
+        hipPivot.add(knee);
 
         const lowerPivot = new THREE.Group();
         lowerPivot.position.y = -0.36;
         hipPivot.add(lowerPivot);
 
-        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.36, 16), pantsMat);
+        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.047, 0.038, 0.36, 16), legMat);
         shin.position.y = -0.18;
         shin.castShadow = true;
         lowerPivot.add(shin);
 
-        const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.106, 0.072, 0.215), shoeMat);
-        shoe.position.set(0, -0.37, 0.042);
+        const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.102, 0.068, 0.205), shoeMat);
+        shoe.position.set(0, -0.37, 0.040);
+        shoe.castShadow = true;
         lowerPivot.add(shoe);
 
-        const sole = new THREE.Mesh(new THREE.BoxGeometry(0.112, 0.022, 0.222), soleMat);
-        sole.position.set(0, -0.405, 0.045);
+        const toeCap = new THREE.Mesh(new THREE.SphereGeometry(0.050, 10, 8), shoeMat);
+        toeCap.scale.set(1.0, 0.65, 0.9);
+        toeCap.position.set(0, -0.378, 0.132);
+        lowerPivot.add(toeCap);
+
+        const sole = new THREE.Mesh(new THREE.BoxGeometry(0.108, 0.020, 0.218), soleMat);
+        sole.position.set(0, -0.405, 0.046);
         lowerPivot.add(sole);
 
         hipPivot.userData.lowerPivot = lowerPivot;
@@ -1978,9 +2217,6 @@
       }
 
       root.userData = { leftLeg, rightLeg, leftArm, rightArm, headGroup, bouquetMesh, isSeated };
-      // The same hand-built actor must remain recognizable on the scooter
-      // and at the ceremony: other NPCs can still use the external GLB rigs.
-      if (!keepOriginalAppearance) upgradeStandingHuman(root, {gender,role,hasBouquet,isSeated});
       return root;
     }
 
@@ -2063,19 +2299,39 @@
         new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.35 })
       );
       giftBox.position.set(0, 0.97, 0.58);
+      giftBox.castShadow = true;
       group.add(giftBox);
+      const giftRibbonMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.45, roughness: 0.3 });
+      const rib1 = new THREE.Mesh(new THREE.BoxGeometry(0.375, 0.29, 0.06), giftRibbonMat);
+      rib1.position.set(0, 0.97, 0.58);
+      const rib2 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.29, 0.355), giftRibbonMat);
+      rib2.position.set(0, 0.97, 0.58);
+      const bowTop = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.018, 8, 14), giftRibbonMat);
+      bowTop.rotation.x = Math.PI / 2;
+      bowTop.position.set(0, 1.13, 0.58);
+      group.add(rib1, rib2, bowTop);
 
       const handleBar = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.72, 12), chromeMat);
       handleBar.rotation.z = Math.PI / 2;
       handleBar.position.set(0, 1.08, -0.48);
       group.add(handleBar);
 
+      const headlightRing = new THREE.Mesh(new THREE.TorusGeometry(0.116, 0.016, 10, 20), chromeMat);
+      headlightRing.position.set(0, 1.03, -0.60);
+      group.add(headlightRing);
       const headlightLens = new THREE.Mesh(
-        new THREE.SphereGeometry(0.112, 14, 14),
-        new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfef08a, emissiveIntensity: 0.14 })
+        new THREE.SphereGeometry(0.110, 14, 14),
+        new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfde047, emissiveIntensity: 0.28 })
       );
       headlightLens.position.set(0, 1.03, -0.62);
       group.add(headlightLens);
+      const frontFender = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.33, 0.33, 0.16, 16, 1, true, -Math.PI * 0.35, Math.PI * 0.7),
+        bodyMat
+      );
+      frontFender.rotation.z = Math.PI / 2;
+      frontFender.position.set(0, 0.34, -0.66);
+      group.add(frontFender);
 
       const basket = new THREE.Mesh(
         new THREE.BoxGeometry(0.38, 0.25, 0.28),
@@ -2177,22 +2433,22 @@
       plinth.receiveShadow = true;
       bGroup.add(plinth);
 
-      const wallMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.48 });
-      const accentMat = new THREE.MeshStandardMaterial({ color: mainColor, roughness: 0.38 });
-      const trimMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.32 });
-      const goldMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.78, roughness: 0.24 });
-      const roofMat = getProceduralPBRMaterial('roof', roofColor, 0.42, 0.16, 4);
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.56, envMapIntensity: 0.35 });
+      const accentMat = new THREE.MeshStandardMaterial({ color: mainColor, roughness: 0.44, envMapIntensity: 0.38 });
+      const trimMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.38, envMapIntensity: 0.42 });
+      const goldMat = new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.65, roughness: 0.28, envMapIntensity: 0.68 });
+      const roofMat = getProceduralPBRMaterial('roof', roofColor, 0.46, 0.14, 4);
       const glassMat = new THREE.MeshPhysicalMaterial({
         color: 0xbae6fd,
         emissive: isFemale ? 0xfce7f3 : 0xe0f2fe,
-        emissiveIntensity: 0.08,
-        roughness: 0.08,
-        metalness: 0.18,
+        emissiveIntensity: 0.10,
+        roughness: 0.10,
+        metalness: 0.16,
         clearcoat: 0.85,
         transparent: true,
-        opacity: 0.78
+        opacity: 0.82
       });
-      const frameMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.78, roughness: 0.24 });
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.72, roughness: 0.28 });
 
       const body = new THREE.Mesh(new THREE.BoxGeometry(10.4, 10.6, 15.6), wallMat);
       body.position.y = 5.85;
@@ -2205,6 +2461,33 @@
         pilaster.position.set(0, 5.85, pz);
         bGroup.add(pilaster);
       });
+
+      // Architectural windows & festive 20/11 banner on the south (+Z) end facade facing the campus gate
+      const southZ = 7.82;
+      [2.3, 5.7, 9.2].forEach((wy) => {
+        [-2.7, 2.7].forEach((wx) => {
+          const swf = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.62, 0.18), frameMat);
+          swf.position.set(wx, wy, southZ);
+          const swg = new THREE.Mesh(new THREE.BoxGeometry(1.88, 1.40, 0.21), glassMat);
+          swg.position.set(wx, wy, southZ);
+          const sws = new THREE.Mesh(new THREE.BoxGeometry(2.26, 0.10, 0.30), trimMat);
+          sws.position.set(wx, wy - 0.84, southZ + 0.06);
+          const swl = new THREE.Mesh(new THREE.BoxGeometry(2.26, 0.08, 0.34), accentMat);
+          swl.position.set(wx, wy + 0.86, southZ + 0.08);
+          bGroup.add(swf, swg, sws, swl);
+        });
+      });
+      const southBanner = createSignBoard(
+        isFemale ? 'CHÀO MỪNG 20/11' : 'TÔN SƯ TRỌNG ĐẠO',
+        isFemale ? '#831843' : '#0c4a6e',
+        '#facc15',
+        '#fef08a',
+        1.45,
+        6.2,
+        true
+      );
+      southBanner.position.set(0, 6.2, southZ + 0.38);
+      bGroup.add(southBanner);
 
       [4.0, 7.5, 11.1].forEach((by) => {
         const band = new THREE.Mesh(new THREE.BoxGeometry(11.15, 0.32, 16.25), trimMat);
@@ -2540,21 +2823,23 @@
 
       const grassGround = new THREE.Mesh(
         new THREE.PlaneGeometry(240, 240),
-        getProceduralPBRMaterial('grass', 0x16a34a, 0.85, 0.02, 34)
+        getProceduralPBRMaterial('grass', 0x2f8541, 0.88, 0.01, 34)
       );
       grassGround.rotation.x = -Math.PI / 2;
       grassGround.receiveShadow = true;
       campusGroup.add(grassGround);
 
-      const mountainMat1 = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
-      const mountainMat2 = new THREE.MeshStandardMaterial({ color: 0x0f766e, roughness: 0.92 });
-      for (let m = 0; m < 18; m++) {
-        const ang = (m / 18) * Math.PI * 2;
-        const dist = 88 + (m % 3) * 14;
-        const mh = 18 + (m % 4) * 7;
-        const mr = 22 + (m % 3) * 8;
-        const hill = new THREE.Mesh(new THREE.ConeGeometry(mr, mh, 14), m % 2 === 0 ? mountainMat1 : mountainMat2);
-        hill.position.set(Math.cos(ang) * dist, mh * 0.45, Math.sin(ang) * dist);
+      // Soft layered distant hills (replaces sharp low-poly cones)
+      const hillMat1 = new THREE.MeshStandardMaterial({ color: 0x2d6a4f, roughness: 0.94, envMapIntensity: 0.25 });
+      const hillMat2 = new THREE.MeshStandardMaterial({ color: 0x3b7a68, roughness: 0.95, envMapIntensity: 0.22 });
+      for (let m = 0; m < 20; m++) {
+        const ang = (m / 20) * Math.PI * 2;
+        const dist = 94 + (m % 3) * 16;
+        const mh = 11 + (m % 4) * 4.5;
+        const mr = 28 + (m % 3) * 10;
+        const hill = new THREE.Mesh(new THREE.SphereGeometry(mr, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.52), m % 2 === 0 ? hillMat1 : hillMat2);
+        hill.scale.set(1.25, mh / mr, 0.95);
+        hill.position.set(Math.cos(ang) * dist, -0.5, Math.sin(ang) * dist);
         campusGroup.add(hill);
       }
 
@@ -2652,18 +2937,18 @@
 
       const gateGroup = new THREE.Group();
       gateGroup.position.set(0, 0, 24);
-      const redMat = new THREE.MeshPhysicalMaterial({ color: 0xb91c1c, roughness: 0.3, metalness: 0.14, clearcoat: 0.45 });
-      const darkRedMat = new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.42 });
-      const goldMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.22, metalness: 0.82 });
-      const gateRoofMat = getProceduralPBRMaterial('roof', 0x991b1b, 0.4, 0.16);
+      const redMat = new THREE.MeshPhysicalMaterial({ color: 0x9f1239, roughness: 0.36, metalness: 0.12, clearcoat: 0.38, envMapIntensity: 0.42 });
+      const darkRedMat = new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.48, envMapIntensity: 0.32 });
+      const goldMat = new THREE.MeshStandardMaterial({ color: 0xeab308, roughness: 0.28, metalness: 0.68, envMapIntensity: 0.65 });
+      const gateRoofMat = getProceduralPBRMaterial('roof', 0x881337, 0.46, 0.14);
 
       [-4.9, 4.9].forEach((px, idx) => {
-        const plinth1 = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.36, 1.45), darkRedMat);
+        const plinth1 = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.36, 1.48), darkRedMat);
         plinth1.position.set(px, 0.18, 0);
         gateGroup.add(plinth1);
 
-        const plinth2 = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.34, 1.22), goldMat);
-        plinth2.position.set(px, 0.53, 0);
+        const plinth2 = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.30, 1.24), goldMat);
+        plinth2.position.set(px, 0.51, 0);
         gateGroup.add(plinth2);
 
         const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 6.2, 22), redMat);
@@ -2671,12 +2956,21 @@
         pillar.castShadow = true;
         gateGroup.add(pillar);
 
-        const sidePillar = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 4.8, 16), redMat);
-        sidePillar.position.set(px + (idx === 0 ? -0.92 : 0.92), 2.9, 0);
-        gateGroup.add(sidePillar);
+        // Grounded side pillar with stone base & lantern cap
+        const sideX = px + (idx === 0 ? -1.05 : 1.05);
+        const sideBase = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.34, 0.76), darkRedMat);
+        sideBase.position.set(sideX, 0.17, 0);
+        const sidePillar = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 4.4, 16), redMat);
+        sidePillar.position.set(sideX, 2.54, 0);
+        sidePillar.castShadow = true;
+        const sideCap = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.20, 0.74), goldMat);
+        sideCap.position.set(sideX, 4.82, 0);
+        const sideTie = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.32, 0.32), redMat);
+        sideTie.position.set((px + sideX) / 2, 4.45, 0);
+        gateGroup.add(sideBase, sidePillar, sideCap, sideTie);
 
-        [1.1, 3.6, 5.9].forEach((ry) => {
-          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.045, 10, 22), goldMat);
+        [1.1, 3.6, 5.85].forEach((ry) => {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.042, 10, 22), goldMat);
           ring.rotation.x = Math.PI / 2;
           ring.position.set(px, ry, 0);
           gateGroup.add(ring);
@@ -2694,17 +2988,25 @@
         couplet.position.set(px, 3.6, 0.52);
         gateGroup.add(couplet);
 
-        const lanternX = px + (idx === 0 ? 0.95 : -0.95);
+        // Traditional bracketed hanging festival lantern
+        const lanternX = px + (idx === 0 ? 0.92 : -0.92);
+        const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.08, 0.08), goldMat);
+        bracket.position.set(px + (idx === 0 ? 0.46 : -0.46), 5.66, 0);
+        const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.26, 6), goldMat);
+        cord.position.set(lanternX, 5.52, 0);
         const lantern = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.26, 0.26, 0.52, 8),
-          new THREE.MeshStandardMaterial({ color: 0xdc2626, emissive: 0xf59e0b, emissiveIntensity: 0.18 })
+          new THREE.SphereGeometry(0.26, 14, 12),
+          new THREE.MeshStandardMaterial({ color: 0xdc2626, emissive: 0xf59e0b, emissiveIntensity: 0.36, roughness: 0.35 })
         );
-        lantern.position.set(lanternX, 5.25, 0);
-        gateGroup.add(lantern);
-
-        const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.34, 8), goldMat);
-        tassel.position.set(lanternX, 4.82, 0);
-        gateGroup.add(tassel);
+        lantern.scale.set(1, 1.18, 1);
+        lantern.position.set(lanternX, 5.14, 0);
+        const lanternTop = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.07, 12), goldMat);
+        lanternTop.position.set(lanternX, 5.42, 0);
+        const lanternBot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.07, 12), goldMat);
+        lanternBot.position.set(lanternX, 4.86, 0);
+        const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.28, 8), goldMat);
+        tassel.position.set(lanternX, 4.68, 0);
+        gateGroup.add(bracket, cord, lantern, lanternTop, lanternBot, tassel);
       });
 
       const archFrame = new THREE.Mesh(new THREE.BoxGeometry(11.8, 1.25, 1.45), redMat);
@@ -2712,30 +3014,37 @@
       archFrame.castShadow = true;
       gateGroup.add(archFrame);
 
-      const archBorder = new THREE.Mesh(new THREE.BoxGeometry(12.1, 0.16, 1.55), goldMat);
+      const archBorder = new THREE.Mesh(new THREE.BoxGeometry(12.1, 0.14, 1.56), goldMat);
       archBorder.position.set(0, 5.82, 0);
       gateGroup.add(archBorder);
 
-      const gateRoof1 = new THREE.Mesh(new THREE.BoxGeometry(13.2, 0.46, 2.25), gateRoofMat);
+      // Clean tiered Vietnamese tile roof with gold trim fascia (no floating cones)
+      const gateRoof1 = new THREE.Mesh(new THREE.BoxGeometry(13.2, 0.40, 2.35), gateRoofMat);
       gateRoof1.position.set(0, 7.22, 0);
+      gateRoof1.castShadow = true;
       gateGroup.add(gateRoof1);
 
-      [-6.7, 6.7].forEach((ex, idx) => {
-        const eave = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.9, 6), goldMat);
-        eave.position.set(ex, 7.52, 0);
-        eave.rotation.z = idx === 0 ? 0.55 : -0.55;
-        gateGroup.add(eave);
-      });
+      const roofFascia1 = new THREE.Mesh(new THREE.BoxGeometry(13.38, 0.10, 2.44), goldMat);
+      roofFascia1.position.set(0, 7.04, 0);
+      gateGroup.add(roofFascia1);
 
-      const gateTopTier = new THREE.Mesh(new THREE.BoxGeometry(8.8, 0.44, 1.65), gateRoofMat);
-      gateTopTier.position.set(0, 7.68, 0);
+      const gateTopTier = new THREE.Mesh(new THREE.BoxGeometry(8.8, 0.42, 1.72), gateRoofMat);
+      gateTopTier.position.set(0, 7.64, 0);
       gateGroup.add(gateTopTier);
 
-      const ridgeFinial = new THREE.Mesh(new THREE.SphereGeometry(0.34, 14, 14), goldMat);
-      ridgeFinial.position.set(0, 8.12, 0);
-      gateGroup.add(ridgeFinial);
+      const roofFascia2 = new THREE.Mesh(new THREE.BoxGeometry(9.0, 0.09, 1.80), goldMat);
+      roofFascia2.position.set(0, 7.86, 0);
+      gateGroup.add(roofFascia2);
 
-      const gateBanner = createSignBoard('CHÀO MỪNG NGÀY NHÀ GIÁO VIỆT NAM 20/11', '#991b1b', '#fde047', '#fef08a', 9.4, 0.9);
+      // Refined lotus-medallion ridge ornament instead of oversized ball
+      const ridgePlinth = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.20, 0.42), darkRedMat);
+      ridgePlinth.position.set(0, 7.98, 0);
+      const ridgeFinial = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 0), goldMat);
+      ridgeFinial.scale.set(1.0, 1.25, 0.65);
+      ridgeFinial.position.set(0, 8.26, 0);
+      gateGroup.add(ridgePlinth, ridgeFinial);
+
+      const gateBanner = createSignBoard('CHÀO MỪNG NGÀY NHÀ GIÁO VIỆT NAM 20/11', '#881337', '#fde047', '#fef08a', 9.4, 0.9);
       gateBanner.position.set(0, 6.45, 0.78);
       gateGroup.add(gateBanner);
       campusGroup.add(gateGroup);
@@ -2873,27 +3182,46 @@
         campusGardenBeds.push(bed);
       });
 
-      const trunkMat = getProceduralPBRMaterial('wood', 0x5c3a21, 0.8);
-      const canopyMat1 = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.74 });
-      const canopyMat2 = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.68 });
+      const trunkMat = getProceduralPBRMaterial('wood', 0x5c3a21, 0.84);
+      const canopyMat1 = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.78, envMapIntensity: 0.22 });
+      const canopyMat2 = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.74, envMapIntensity: 0.24 });
+      const flameBlossomMat = new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.62, envMapIntensity: 0.26 });
+      const goldBlossomMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.58, envMapIntensity: 0.28 });
       [
-        [-22, 18], [22, 18], [-22, 4], [22, 4], [-22, -12], [22, -12],
-        [-12, -18], [0, -19], [12, -18]
-      ].forEach(([tx, tz]) => {
+        [-22, 18, true], [22, 18, true], [-22, 4, false], [22, 4, false], [-22, -12, true], [22, -12, true],
+        [-12, -18, false], [0, -19, true], [12, -18, false]
+      ].forEach(([tx, tz, isFlame], idx) => {
         const tree = new THREE.Group();
         tree.position.set(tx, 0, tz);
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.45, 3.2, 12), trunkMat);
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.44, 3.2, 12), trunkMat);
         trunk.position.y = 1.6;
         trunk.castShadow = true;
         tree.add(trunk);
 
-        [[0, 4.3, 0, 2.05, canopyMat1], [-1.15, 3.75, 0.65, 1.45, canopyMat2], [1.15, 3.85, -0.55, 1.5, canopyMat2], [0, 5.25, 0.3, 1.35, canopyMat1]].forEach(([cx, cy, cz, cr, cm]) => {
+        // Secondary branches for organic silhouette
+        [[-0.55, 2.8, 0.2, 0.42], [0.55, 2.85, -0.2, -0.42]].forEach(([bx, by, bz, rz]) => {
+          const br = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.18, 1.5, 8), trunkMat);
+          br.position.set(bx, by, bz);
+          br.rotation.z = rz;
+          tree.add(br);
+        });
+
+        const accentCrown = isFlame ? (idx === 7 ? goldBlossomMat : flameBlossomMat) : canopyMat2;
+        [
+          [0, 4.45, 0, 1.95, canopyMat1],
+          [-1.25, 3.85, 0.65, 1.42, canopyMat2],
+          [1.25, 3.92, -0.55, 1.46, canopyMat2],
+          [0.15, 5.35, 0.28, 1.32, accentCrown],
+          [-0.95, 4.75, -0.62, 1.15, accentCrown],
+          [0.98, 4.62, 0.72, 1.12, isFlame ? accentCrown : canopyMat1]
+        ].forEach(([cx, cy, cz, cr, cm]) => {
           const crown = new THREE.Mesh(new THREE.SphereGeometry(cr, 12, 12), cm);
+          crown.scale.set(1.08, 0.86, 1.05);
           crown.position.set(cx, cy, cz);
           crown.castShadow = true;
           tree.add(crown);
         });
-        tree.add(createContactShadow(2.2, 2.2, 0.3));
+        tree.add(createContactShadow(2.4, 2.4, 0.30));
         campusGroup.add(tree);
       });
 
@@ -2929,7 +3257,7 @@
       campusScooterGroup = cub.group;
       scooterRiderMesh = cub.rider;
       scooterWheels = cub.wheels;
-      campusScooterGroup.position.set(0, 0.14, 18);
+      campusScooterGroup.position.set(0, 0.14, 13.5);
       campusGroup.add(campusScooterGroup);
 
       // During the intro, the single protagonist is riding the scooter.
@@ -3023,15 +3351,15 @@
       return {group,pivots:{left:leftPivot,right:rightPivot}};
     }
 
-    function createCenterTwoFlightStaircase(group, actionType) {
+    function createCenterTwoFlightStaircase(group, actionType, isLower = false) {
       const stairGroup = new THREE.Group();
       stairGroup.position.set(0, 0, 0.80);
-      const stone = getProceduralPBRMaterial('tile', 0x64748b, 0.65, 0.025, 2);
-      const riserMat = new THREE.MeshStandardMaterial({ color: 0xd4dbe2, roughness: 0.85 });
-      const nosing = new THREE.MeshStandardMaterial({ color: 0x6b7685, metalness: 0.12, roughness: 0.66 });
-      const steel = new THREE.MeshStandardMaterial({ color: 0x9ca9b6, roughness: 0.34, metalness: 0.75 });
-      const railMat = new THREE.MeshStandardMaterial({ color: 0x526170, roughness: 0.32, metalness: 0.6 });
-      const paint = new THREE.MeshStandardMaterial({ color: 0xf0f0ee, roughness: 0.85 });
+      const stone = getProceduralPBRMaterial('tile', 0x64748b, 0.62, 0.03, 2);
+      const riserMat = new THREE.MeshStandardMaterial({ color: 0xd4dbe2, roughness: 0.82 });
+      const nosing = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.16, roughness: 0.58 });
+      const steel = new THREE.MeshStandardMaterial({ color: 0x9ca9b6, roughness: 0.30, metalness: 0.78 });
+      const railMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.30, metalness: 0.65 });
+      const paint = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.84 });
       const n = 11, totalRise = 1.9, run = 2.9, rise = totalRise / n, depth = run / n;
       const x1=1.04, x2=-1.04, zFront=0, zRear=-run;
 
@@ -3042,22 +3370,44 @@
         if(interactive && actionType) obj.userData.interactiveType=actionType;
         stairGroup.add(obj); return obj;
       }
-      // Stairwell walls leave the front entry unobstructed.
-      box(0.14,4.25,4.15, 2.15,2.125,-1.90,paint);
-      box(0.14,4.25,4.15,-2.15,2.125,-1.90,paint);
-      box(4.44,4.25,0.16,0,2.125,-4.04,paint);
+      // Architectural open stairwell: rear windowed wall + low concrete curbs and tempered glass balustrades
+      // so the hallway corridor and classroom doors remain visually open and unobstructed.
+      const wallH = isLower ? 3.76 : 3.92;
+      box(4.44, wallH, 0.16, 0, wallH / 2, -4.04, paint);
       const glass = new THREE.MeshPhysicalMaterial({
-        color:0xbdd5e2, transparent:true, opacity:0.26, roughness:0.45,
-        depthWrite:false, side:THREE.DoubleSide
+        color: 0xbdd5e2, transparent: true, opacity: 0.24, roughness: 0.20,
+        depthWrite: false, side: THREE.DoubleSide
       });
-      // Transparent glazing is bounded by discrete metal frame bars.
-      box(2.09,1.55,0.07,0,2.68,-3.94,glass);
-      box(2.25,0.09,0.12,0,3.50,-3.89,steel);
-      box(2.25,0.09,0.12,0,1.87,-3.89,steel);
-      box(0.09,1.72,0.12,-1.12,2.68,-3.89,steel);
-      box(0.09,1.72,0.12,1.12,2.68,-3.89,steel);
-      box(0.07,1.55,0.11,0,2.68,-3.87,steel);
-      box(2.11,0.07,0.11,0,2.68,-3.87,steel);
+      const guardGlass = new THREE.MeshPhysicalMaterial({
+        color: 0xcbe6f2, transparent: true, opacity: 0.22, roughness: 0.14,
+        depthWrite: false, side: THREE.DoubleSide
+      });
+      if (!isLower) {
+        // Low architectural side curbs + slim structural columns + glass side screens
+        for (const sx of [-2.12, 2.12]) {
+          box(0.14, 0.24, 4.10, sx, 0.12, -1.94, paint);
+          box(0.04, 0.88, 4.02, sx, 0.68, -1.94, guardGlass);
+          box(0.06, 0.05, 4.08, sx, 1.14, -1.94, railMat);
+          for (const sz of [-3.92, -1.94, 0.04]) {
+            box(0.08, 1.16, 0.08, sx, 0.58, sz, steel);
+          }
+        }
+      } else {
+        // Guardrail around the floor cutout on the upper floor
+        for (const sx of [-2.12, 2.12]) {
+          box(0.12, 0.16, 4.12, sx, HALL_STAIR.landingY + 0.08, -1.94, paint);
+          box(0.04, 0.88, 4.04, sx, HALL_STAIR.landingY + 0.60, -1.94, guardGlass);
+          box(0.06, 0.05, 4.10, sx, HALL_STAIR.landingY + 1.06, -1.94, railMat);
+        }
+      }
+      // Tall sunlit stairwell window on rear wall
+      box(2.09, 1.55, 0.07, 0, 2.62, -3.94, glass);
+      box(2.25, 0.09, 0.12, 0, 3.44, -3.89, steel);
+      box(2.25, 0.09, 0.12, 0, 1.81, -3.89, steel);
+      box(0.09, 1.72, 0.12, -1.12, 2.62, -3.89, steel);
+      box(0.09, 1.72, 0.12, 1.12, 2.62, -3.89, steel);
+      box(0.07, 1.55, 0.11, 0, 2.62, -3.87, steel);
+      box(2.11, 0.07, 0.11, 0, 2.62, -3.87, steel);
 
       for(let i=0;i<n;i++){
         const height=(i+1)*rise;
@@ -3129,24 +3479,23 @@
       if (upAction) {
         const upper = new THREE.Group();
         upper.position.x = upX;
-        createCenterTwoFlightStaircase(upper, upAction);
+        createCenterTwoFlightStaircase(upper, upAction, false);
         targetGroup.add(upper);
         registerCollider(upX, -1.17, 4.30, 4.44, 0.02);
-        const sign = createSignBoard('LÊN TẦNG ' + (level + 1), '#164e63', '#38bdf8', '#f8fafc', 2.20, 0.39);
-        sign.position.set(upX + 1.04, 2.15, 1.30);
+        const sign = createSignBoard('LÊN TẦNG ' + (level + 1), '#164e63', '#38bdf8', '#f8fafc', 2.15, 0.38);
+        sign.position.set(upX + 1.04, 2.32, 1.02);
+        sign.traverse(c => { if (c.isMesh) c.userData.interactiveType = upAction; });
         targetGroup.add(sign);
       }
       if (downAction) {
-        // Re-use exactly the same flight geometry at the elevation below the
-        // current floor. The uppermost tread is level with the current floor.
-        // A real cutout in the corridor slab exposes the descending steps.
         const lower = new THREE.Group();
         lower.position.set(downX, -HALL_STAIR.landingY, 0);
-        createCenterTwoFlightStaircase(lower, downAction);
+        createCenterTwoFlightStaircase(lower, downAction, true);
         targetGroup.add(lower);
         registerCollider(downX, -1.17, 4.30, 4.44, 0.02);
-        const sign = createSignBoard('XUỐNG TẦNG ' + (level - 1), '#78350f', '#fbbf24', '#fff7ed', 2.25, 0.39);
-        sign.position.set(downX - 1.04, 2.15, 1.30);
+        const sign = createSignBoard('XUỐNG TẦNG ' + (level - 1), '#78350f', '#fbbf24', '#fff7ed', 2.20, 0.38);
+        sign.position.set(downX - 1.04, 2.32, 1.02);
+        sign.traverse(c => { if (c.isMesh) c.userData.interactiveType = downAction; });
         targetGroup.add(sign);
       }
     }
@@ -3289,23 +3638,37 @@
         { mesh: hallTeacher, phase: 2.5 }
       );
 
-      const floorGloss = new THREE.Mesh(
-        new THREE.PlaneGeometry(25.6, 6.8),
-        new THREE.MeshPhysicalMaterial({
-          color: 0xffffff,
-          roughness: 0.12,
-          metalness: 0.08,
-          clearcoat: 0.9,
-          transparent: true,
-          opacity: 0.14
-        })
-      );
-      floorGloss.rotation.x = -Math.PI / 2;
-      floorGloss.position.set(0, 0.006, 0.2);
-      targetGroup.add(floorGloss);
+      // Subtle glossy floor strip that respects the stairwell floor cutout
+      const glossMat = new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        roughness: 0.14,
+        metalness: 0.06,
+        clearcoat: 0.85,
+        transparent: true,
+        opacity: 0.11,
+        depthWrite: false
+      });
+      function makeGlossStrip(x0, x1, z0, z1) {
+        if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return;
+        const g = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), glossMat);
+        g.rotation.x = -Math.PI / 2;
+        g.position.set((x0 + x1) / 2, 0.006, (z0 + z1) / 2);
+        targetGroup.add(g);
+      }
+      if (floorHoleX === null) {
+        makeGlossStrip(-12.8, 12.8, -3.2, 3.6);
+      } else {
+        const hx0 = floorHoleX - HALL_STAIR.shaftHalfWidth;
+        const hx1 = floorHoleX + HALL_STAIR.shaftHalfWidth;
+        makeGlossStrip(-12.8, hx0, -3.2, 3.6);
+        makeGlossStrip(hx1, 12.8, -3.2, 3.6);
+        makeGlossStrip(hx0, hx1, HALL_STAIR.cutoutZ1, 3.6);
+      }
     }
 
     function buildRoomShell(targetGroup, { width = 14, depth = 12, height = 3.8, exitType = 'exit_to_hallway1', floorType = 'tile', floorColor = 0xf1f5f9, withWindows = true }) {
+      activeRoomSpec = { width, depth, height };
+      ceilingFans = ceilingFans.filter(f => f.parent && f.parent !== targetGroup);
       const theme = getActiveBuildingTheme();
       const floor = new THREE.Mesh(
         new THREE.BoxGeometry(width, 0.2, depth),
@@ -3458,8 +3821,8 @@
 
       buildHallwayCorridorShell(hallwayGroup, 0xe2e8f0, 1);
 
-      const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 1`, theme.signBg, theme.signBorder, '#ffffff', 5.8, 0.56);
-      banner.position.set(0, 3.45, -3.45);
+      const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 1`, theme.signBg, theme.signBorder, '#ffffff', 4.3, 0.50);
+      banner.position.set(-1.55, 3.44, -3.40);
       hallwayGroup.add(banner);
 
       createHallwayStairLayout(hallwayGroup, 1);
@@ -3502,77 +3865,84 @@
     }
 
     function addTeacherPodiumAndFurniture(targetGroup, accentHex = 0x0284c7) {
+      // Wide authentic Vietnamese classroom podium (bục giảng) spanning both teacher and teacher's desk
       const podium = new THREE.Mesh(
-        new THREE.BoxGeometry(3.2, 0.16, 1.85),
-        getProceduralPBRMaterial('wood', 0x92400e, 0.45)
+        new THREE.BoxGeometry(5.8, 0.16, 1.95),
+        getProceduralPBRMaterial('wood', 0x8a4b1f, 0.48)
       );
       podium.position.set(0, 0.08, -4.65);
-      addPrecisionEdge(podium,0x5a3821,0.24);
+      addPrecisionEdge(podium, 0x4e2d16, 0.22);
       podium.receiveShadow = true;
       targetGroup.add(podium);
 
-      // Actual open-leg teacher's table (not a 0.78m solid wooden box).
-      const teacherDesk=new THREE.Group();
-      teacherDesk.position.set(1.55,0,-4.55);
-      const topMat=getProceduralPBRMaterial('wood',0xab7345,0.52,0.01,1.8);
-      const sideMat=getProceduralPBRMaterial('wood',0x7d4d2f,0.63,0.01,1.4);
-      const deskSteel=new THREE.MeshStandardMaterial({
-        color:0x4b5563,metalness:0.62,roughness:0.43
+      // Actual open-leg teacher's table resting squarely ON TOP of the podium (y = 0.16)
+      const teacherDesk = new THREE.Group();
+      teacherDesk.position.set(1.92, 0.16, -4.58);
+      const topMat = getProceduralPBRMaterial('wood', 0xab7345, 0.50, 0.01, 1.8);
+      const sideMat = getProceduralPBRMaterial('wood', 0x7d4d2f, 0.62, 0.01, 1.4);
+      const deskSteel = new THREE.MeshStandardMaterial({
+        color: 0x4b5563, metalness: 0.62, roughness: 0.43
       });
-      const desktop=new THREE.Mesh(new THREE.BoxGeometry(1.75,0.065,0.79),topMat);
-      desktop.position.y=0.915;
-      desktop.castShadow=true;desktop.receiveShadow=true;
-      addPrecisionEdge(desktop,0x4e321c,0.21);
+      const desktop = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.065, 0.79), topMat);
+      desktop.position.y = 0.855;
+      desktop.castShadow = true; desktop.receiveShadow = true;
+      addPrecisionEdge(desktop, 0x4e321c, 0.21);
       teacherDesk.add(desktop);
-      const drawer=new THREE.Mesh(new THREE.BoxGeometry(1.50,0.14,0.54),sideMat);
-      drawer.position.set(0,0.795,-0.065);
-      drawer.castShadow=true;
+      const drawer = new THREE.Mesh(new THREE.BoxGeometry(1.50, 0.14, 0.54), sideMat);
+      drawer.position.set(0, 0.735, -0.065);
+      drawer.castShadow = true;
       teacherDesk.add(drawer);
-      for(const lx of [-0.77,0.77]){
-        for(const lz of [-0.32,0.32]){
-          const leg=new THREE.Mesh(new THREE.BoxGeometry(0.055,0.82,0.055),deskSteel);
-          leg.position.set(lx,0.41,lz);
-          leg.castShadow=true;
+      for (const lx of [-0.77, 0.77]) {
+        for (const lz of [-0.32, 0.32]) {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.82, 0.055), deskSteel);
+          leg.position.set(lx, 0.41, lz);
+          leg.castShadow = true;
           teacherDesk.add(leg);
         }
-        const rail=new THREE.Mesh(new THREE.BoxGeometry(0.032,0.035,0.64),deskSteel);
-        rail.position.set(lx,0.62,0);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.035, 0.64), deskSteel);
+        rail.position.set(lx, 0.58, 0);
         teacherDesk.add(rail);
       }
-      const frontPanel=new THREE.Mesh(new THREE.BoxGeometry(1.48,0.34,0.035),sideMat);
-      frontPanel.position.set(0,0.68,-0.30);
+      const frontPanel = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.34, 0.035), sideMat);
+      frontPanel.position.set(0, 0.62, -0.30);
       teacherDesk.add(frontPanel);
-      const drawerHandle=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.018,0.023),
-        new THREE.MeshStandardMaterial({color:0xb7bcc6,metalness:0.78,roughness:0.27}));
-      drawerHandle.position.set(0.23,0.81,0.212);
+      const drawerHandle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.018, 0.023),
+        new THREE.MeshStandardMaterial({ color: 0xb7bcc6, metalness: 0.78, roughness: 0.27 }));
+      drawerHandle.position.set(0.23, 0.75, 0.212);
       teacherDesk.add(drawerHandle);
       targetGroup.add(teacherDesk);
+      registerCollider(1.92, -4.58, 1.80, 0.85, 0.16);
 
+      // Vase positioned on far-right edge of teacher desk so it never obstructs Room 102 slide counter
       const vase = createFlowerVase(accentHex);
-      vase.position.set(1.95, 0.94, -4.45);
+      vase.scale.set(0.88, 0.88, 0.88);
+      vase.position.set(2.58, 1.045, -4.46);
       targetGroup.add(vase);
 
       const lessonBook = new THREE.Mesh(
-        new THREE.BoxGeometry(0.36, 0.045, 0.26),
-        new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.4 })
+        new THREE.BoxGeometry(0.36, 0.042, 0.26),
+        new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.42 })
       );
-      lessonBook.position.set(1.25, 0.96, -4.48);
+      lessonBook.position.set(1.58, 1.065, -4.50);
       targetGroup.add(lessonBook);
 
       const shelf1 = createBookshelfWithBooks(accentHex);
       shelf1.position.set(6.45, 0, -3.6);
       shelf1.rotation.y = -Math.PI / 2;
       targetGroup.add(shelf1);
+      registerCollider(6.45, -3.6, 0.55, 1.5, 0.12);
 
       const shelf2 = createBookshelfWithBooks(accentHex);
       shelf2.position.set(6.45, 0, 1.2);
       shelf2.rotation.y = -Math.PI / 2;
       targetGroup.add(shelf2);
+      registerCollider(6.45, 1.2, 0.55, 1.5, 0.12);
 
       [[-5.8, -5.0], [5.8, -5.0], [-5.8, 4.8], [5.8, 4.8]].forEach(([px, pz]) => {
         const plant = createPottedIndoorPlant(0.95);
         plant.position.set(px, 0, pz);
         targetGroup.add(plant);
+        registerCollider(px, pz, 0.58, 0.58, 0.10);
       });
     }
 
@@ -3646,62 +4016,107 @@
       clockAndSlogan.position.set(0, 3.38, -5.84);
       classroomGroup.add(clockAndSlogan);
 
-      const boardTex = makeCanvasTexture('board_101_' + currentBuildingSide, 1024, 384, (ctx, w, h) => {
-        ctx.fillStyle = '#064e3b';
+      const boardTex = makeCanvasTexture('board_101_v10_' + currentBuildingSide, 1280, 480, (ctx, w, h) => {
+        // Rich dark emerald slate with subtle chalk dust grain
+        const bg = ctx.createRadialGradient(w * 0.5, h * 0.45, 40, w * 0.5, h * 0.5, w * 0.65);
+        bg.addColorStop(0, '#0a5c44');
+        bg.addColorStop(1, '#043829');
+        ctx.fillStyle = bg;
         ctx.fillRect(0, 0, w, h);
-        ctx.strokeStyle = '#d97706';
-        ctx.lineWidth = 14;
-        ctx.strokeRect(8, 8, w - 16, h - 16);
+        // Subtle chalk smudge streaks & delicate corner blossoms
+        ctx.fillStyle = 'rgba(255,255,255,0.03)';
+        for (let i = 0; i < 24; i++) {
+          ctx.fillRect(70 + (i * 53) % (w - 140), 50 + (i * 37) % (h - 100), 60 + (i % 4) * 35, 6);
+        }
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(32, 28, w - 64, h - 56);
+        ctx.strokeStyle = 'rgba(167, 243, 208, 0.30)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(42, 38, w - 84, h - 76);
+        // Chalk decorative flowers at corners
+        [[78, 72], [w - 78, 72], [78, h - 72], [w - 78, h - 72]].forEach(([fx, fy]) => {
+          ctx.fillStyle = 'rgba(254, 240, 138, 0.55)';
+          for (let p = 0; p < 5; p++) {
+            const a = (p / 5) * Math.PI * 2;
+            ctx.beginPath(); ctx.arc(fx + Math.cos(a) * 10, fy + Math.sin(a) * 10, 5, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.fillStyle = '#fb7185'; ctx.beginPath(); ctx.arc(fx, fy, 4, 0, Math.PI * 2); ctx.fill();
+        });
         ctx.fillStyle = '#fef9c3';
-        ctx.font = '800 44px Inter, sans-serif';
+        ctx.font = '800 42px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(
           currentBuildingSide === 'female' ? 'TRANG TRÍ LỚP CHÀO MỪNG 20/11' : 'CHÀO MỪNG NGÀY NHÀ GIÁO VIỆT NAM 20/11',
           w / 2,
-          120
+          175,
+          w - 160
         );
         ctx.fillStyle = '#a7f3d0';
-        ctx.font = '600 28px Inter, sans-serif';
-        ctx.fillText('“Tôn Sư Trọng Đạo — Uống Nước Nhớ Nguồn”', w / 2, 210);
+        ctx.font = 'italic 600 28px Inter, sans-serif';
+        ctx.fillText('“Tôn Sư Trọng Đạo — Uống Nước Nhớ Nguồn”', w / 2, 265, w - 180);
+        ctx.fillStyle = 'rgba(254, 240, 138, 0.72)';
+        ctx.font = '600 20px Inter, sans-serif';
+        ctx.fillText('✦ Nhấn vào bảng để viết lời chúc 20/11 của bạn ✦', w / 2, 360);
       });
+      const boardSideMat = new THREE.MeshStandardMaterial({ color: 0x052e22, roughness: 0.8 });
+      const boardFaceMat = new THREE.MeshBasicMaterial({ map: boardTex });
       const board = new THREE.Mesh(
-        new THREE.BoxGeometry(5.6, 1.95, 0.1),
-        new THREE.MeshBasicMaterial({ map: boardTex })
+        new THREE.BoxGeometry(5.6, 1.95, 0.09),
+        [boardSideMat, boardSideMat, boardSideMat, boardSideMat, boardFaceMat, boardSideMat]
       );
       board.position.set(0, 1.95, -5.78);
       board.userData = { interactiveType: 'chalkboard_wish' };
       classroomGroup.add(board);
-      addClassroomBoardTrim(classroomGroup,board,5.6,1.95,false);
+      addClassroomBoardTrim(classroomGroup, board, 5.6, 1.95, false);
       room101BoardMesh = board;
-      if (room101SavedWishes.length > 0) {
-        updateRoom101ChalkboardWish(room101SavedWishes[room101SavedWishes.length - 1]);
+      const savedForSide = room101SavedWishesByBuilding[currentBuildingSide] || [];
+      if (savedForSide.length > 0) {
+        updateRoom101ChalkboardWish(savedForSide[savedForSide.length - 1]);
       }
 
       if (currentBuildingSide === 'female') {
         const festiveClearance=createSceneClearancePlanner(14,12);
-        festiveClearance.reserve('teacher platform',0,-4.65,3.2,1.85,0.05);
+        festiveClearance.reserve('teacher platform',0,-4.65,5.8,1.95,0.05);
         festiveClearance.reserve('class exit',0,5.15,2.35,0.75,0.04);
-        // Festive balloons & triangle bunting garlands
-        for (let b = 0; b < 18; b++) {
+        // Neatly arranged corner & side-wall balloon clusters (never blocking slogan, clock, or camera lens!)
+        const balloonCoords = [
+          [-5.6, 3.25, -4.6], [-5.1, 3.40, -4.3], [-4.5, 3.22, -4.8],
+          [5.6, 3.25, -4.6], [5.1, 3.40, -4.3], [4.5, 3.22, -4.8],
+          [-5.8, 3.28, -1.6], [-5.8, 3.32, 1.4], [5.8, 3.28, -1.6], [5.8, 3.32, 1.4],
+          [-4.8, 3.35, 3.8], [4.8, 3.35, 3.8]
+        ];
+        const stringMat = new THREE.MeshBasicMaterial({ color: 0xe2e8f0 });
+        balloonCoords.forEach(([bx, by, bz], b) => {
+          const bGroup = new THREE.Group();
           const balloon = new THREE.Mesh(
-            new THREE.SphereGeometry(0.24, 14, 14),
-            new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.25 })
+            new THREE.SphereGeometry(0.22, 14, 14),
+            new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.24, metalness: 0.08 })
           );
-          balloon.position.set(-5.4 + (b % 9) * 1.35, 3.25 - Math.floor(b / 9) * 0.25, -4.4 + Math.floor(b / 9) * 6.8);
+          balloon.scale.set(0.92, 1.12, 0.92);
+          balloon.position.set(bx, by, bz);
           balloon.userData = { isDecorBalloon: true, colorIdx: b };
-          classroomGroup.add(balloon);
-        }
+          const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.55, 4), stringMat);
+          cord.position.set(bx, by - 0.50, bz);
+          bGroup.add(balloon, cord);
+          classroomGroup.add(bGroup);
+        });
+        applyPinkClassroomDecorTheme(classroomGroup, pinkDecorThemeIdx);
 
+        // Festive bunting draped along left & right side walls (clear of front slogan & clock!)
         const flagColors = [0xf43f5e, 0xfacc15, 0x38bdf8, 0xa855f7, 0x10b981];
-        for (let f = -5.2; f <= 5.2; f += 0.65) {
-          const tri = new THREE.Mesh(
-            new THREE.ConeGeometry(0.16, 0.34, 3),
-            new THREE.MeshStandardMaterial({ color: flagColors[Math.abs(Math.round(f * 2)) % flagColors.length], roughness: 0.4 })
-          );
-          tri.rotation.x = Math.PI;
-          tri.position.set(f, 3.45 - Math.cos((f / 5.2) * (Math.PI / 2)) * 0.28, -2.2);
-          classroomGroup.add(tri);
-        }
+        [-6.65, 6.65].forEach((sideX, sIdx) => {
+          for (let fz = -4.2; fz <= 4.2; fz += 0.72) {
+            const tri = new THREE.Mesh(
+              new THREE.ConeGeometry(0.14, 0.30, 3),
+              new THREE.MeshStandardMaterial({ color: flagColors[Math.abs(Math.round(fz * 2) + sIdx) % flagColors.length], roughness: 0.42 })
+            );
+            tri.rotation.x = Math.PI;
+            tri.rotation.y = Math.PI / 2;
+            tri.position.set(sideX, 3.45 - Math.cos((fz / 4.4) * (Math.PI / 2)) * 0.22, fz);
+            classroomGroup.add(tri);
+          }
+        });
 
         // Student desks & chairs arranged in festive classroom groups
         [[-3.2, -1.6], [3.2, -1.6], [-3.2, 1.4], [3.2, 1.4]].forEach(([dx, dz]) => {
@@ -3713,19 +4128,38 @@
           registerCollider(seatCluster.x,seatCluster.z,1.76,1.28,0.12);
         });
 
-        // Central gift & floral arrangement table
-        const centerTable = new THREE.Mesh(
-          new THREE.BoxGeometry(1.8, 0.74, 1.0),
-          getProceduralPBRMaterial('wood', 0xb45309, 0.4)
+        // Refined 4-legged festive floral display table with pink-and-gold runner (replaces monolithic block)
+        const cTable = new THREE.Group();
+        cTable.position.set(0, 0, -0.2);
+        const woodMat = getProceduralPBRMaterial('wood', 0x9a5828, 0.46, 0.02, 2);
+        const topMesh = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.06, 1.04), woodMat);
+        topMesh.position.y = 0.74; topMesh.castShadow = true; topMesh.receiveShadow = true;
+        addPrecisionEdge(topMesh, 0x4e2d16, 0.20);
+        cTable.add(topMesh);
+        const runnerCloth = new THREE.Mesh(
+          new THREE.BoxGeometry(0.72, 0.014, 1.12),
+          new THREE.MeshStandardMaterial({ color: 0xdb2777, roughness: 0.65 })
         );
-        festiveClearance.reserve('central flower table',0,-0.2,1.8,1.0,0.10);
-        centerTable.position.set(0, 0.37, -0.2);
-        addPrecisionEdge(centerTable,0x56361f,0.24);
-        classroomGroup.add(centerTable);
-        registerCollider(0,-0.2,1.8,1.0,0.16);
+        runnerCloth.position.y = 0.776;
+        const runnerGold = new THREE.Mesh(
+          new THREE.BoxGeometry(0.78, 0.010, 1.10),
+          new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.45, roughness: 0.35 })
+        );
+        runnerGold.position.y = 0.772;
+        cTable.add(runnerGold, runnerCloth);
+        for (const lx of [-0.82, 0.82]) for (const lz of [-0.42, 0.42]) {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.72, 0.065), woodMat);
+          leg.position.set(lx, 0.36, lz); leg.castShadow = true;
+          cTable.add(leg);
+        }
+        const underShelf = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.03, 0.76), woodMat);
+        underShelf.position.y = 0.26; cTable.add(underShelf);
+        festiveClearance.reserve('central flower table', 0, -0.2, 1.88, 1.06, 0.10);
+        classroomGroup.add(cTable);
+        registerCollider(0, -0.2, 1.88, 1.06, 0.16);
 
         const centerVase = createFlowerVase(0xf43f5e);
-        centerVase.position.set(0, 0.74, -0.2);
+        centerVase.position.set(0, 0.78, -0.2);
         classroomGroup.add(centerVase);
 
         // 6 lively students decorating the room
@@ -3754,6 +4188,7 @@
           });
           classroomGroup.add(st);
           pinkRoom101Students.push({ mesh: st, phase: idx * 1.1 });
+          activeIdleCharacters.push({ mesh: st, phase: idx * 1.1 });
         });
       } else {
         room101Teacher = createRealisticHuman({
@@ -3766,10 +4201,9 @@
           if (c.isMesh) c.userData.interactiveType = 'gift_teacher_101';
         });
         classroomGroup.add(room101Teacher);
-        registerCollider(1.55,-4.55,1.75,0.78,0.16);
+        activeIdleCharacters.push({ mesh: room101Teacher, phase: 0.2 });
 
         // Two banks of double desks leave a real 3.6 m central procession aisle.
-        // 2 columns x 3 rows x 2 seats = 12, with correct seated positions.
         [-2.7, 2.7].forEach((dx, colIdx) => {
           [-2.4, -0.15, 2.1].forEach((dz, rowIdx) => {
             const deskAndChair = createStudentDeskAndChair(true, true);
@@ -3783,11 +4217,11 @@
                 role: 'student',
                 isSeated: true
               });
-              // Seat center is desk position + 0.46m; don't offset the torso from its chair.
               st.position.set(dx + seatOffX, 0, dz + 0.46);
               st.rotation.y = Math.PI;
               classroomGroup.add(st);
               room101SeatedStudents.push({ mesh: st, phase: colIdx + rowIdx + seatIdx });
+              activeIdleCharacters.push({ mesh: st, phase: (colIdx * 3 + rowIdx + seatIdx) * 0.8 });
             });
           });
         });
@@ -3817,43 +4251,59 @@
       clockAndSlogan.position.set(0, 3.43, -5.84);
       classroomGroup.add(clockAndSlogan);
 
-      // Ceiling-mounted projector
+      // Ceiling-mounted projector positioned high & clear of the front wall slogan banner
       const projRod = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.03, 0.03, 0.55, 8),
+        new THREE.CylinderGeometry(0.028, 0.028, 0.22, 8),
         new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8 })
       );
-      projRod.position.set(0, 3.52, -1.8);
+      projRod.position.set(0, 3.68, -0.55);
       const projBody = new THREE.Mesh(
-        new THREE.BoxGeometry(0.45, 0.14, 0.38),
+        new THREE.BoxGeometry(0.42, 0.12, 0.36),
         new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
       );
-      projBody.position.set(0, 3.22, -1.8);
-      classroomGroup.add(projRod, projBody);
+      projBody.position.set(0, 3.54, -0.55);
+      const projLens = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.045, 0.06, 12),
+        new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.85, roughness: 0.15, emissive: 0x38bdf8, emissiveIntensity: 0.35 })
+      );
+      projLens.rotation.x = Math.PI / 2;
+      projLens.position.set(0, 3.54, -0.74);
+      classroomGroup.add(projRod, projBody, projLens);
 
-      // Slides are directly touchable on the classroom board (no modal).
+      // Slides are directly touchable on the classroom board (front face only; clean matte housing on sides)
+      const slideSideMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
+      const slideFrontMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
       room102SlideMesh = new THREE.Mesh(
         new THREE.BoxGeometry(5.0, 2.25, 0.09),
-        new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false })
+        [slideSideMat, slideSideMat, slideSideMat, slideSideMat, slideFrontMat, slideSideMat]
       );
-      room102SlideMesh.position.set(0.45, 1.95, -5.8);
+      room102SlideMesh.position.set(0.45, 1.98, -5.8);
       room102SlideMesh.userData.interactiveType = 'room102_slide_touch';
       classroomGroup.add(room102SlideMesh);
-      addClassroomBoardTrim(classroomGroup,room102SlideMesh,5.0,2.25,true);
+      addClassroomBoardTrim(classroomGroup, room102SlideMesh, 5.0, 2.25, true);
       initRoom102Slides();
 
-      const magSign = createSignBoard('BÁO TƯỜNG TRI ÂN 20/11', '#881337', '#fda4af', '#fff1f2', 2.4, 1.55);
-      magSign.position.set(-4.35, 1.95, -5.78);
-      magSign.traverse((c) => {
-        if (c.isMesh) c.userData.interactiveType = 'open_wall_newspaper';
-      });
-      classroomGroup.add(magSign);
+      // Authentic illustrated 20/11 Vietnamese Wall Newspaper (Báo Tường)
+      const magGroup = new THREE.Group();
+      magGroup.position.set(-4.35, 1.98, -5.78);
+      const magBack = new THREE.Mesh(
+        new THREE.BoxGeometry(2.50, 1.66, 0.09),
+        new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.45 })
+      );
+      const magFace = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.38, 1.54),
+        new THREE.MeshBasicMaterial({ map: createWallNewspaperTexture(), toneMapped: false })
+      );
+      magFace.position.z = 0.052;
+      magBack.userData.interactiveType = 'open_wall_newspaper';
+      magFace.userData.interactiveType = 'open_wall_newspaper';
+      magGroup.add(magBack, magFace);
+      classroomGroup.add(magGroup);
 
       // Digital classroom: two realistic banks of desks and a clear central aisle.
       [-2.7, 2.7].forEach((dx, colIdx) => {
         [-1.8, 0.4, 2.4].forEach((dz, rowIdx) => {
           const deskAndChair = createStudentDeskAndChair(true, true);
-          // Seated bodies and chairs are an intentional assembly, so reserve
-          // a combined footprint instead of separating the components.
           clearance.reserve('desk and seats',dx,dz+0.22,1.75,1.28,0.10);
           deskAndChair.position.set(dx, 0, dz);
           classroomGroup.add(deskAndChair);
@@ -3873,26 +4323,29 @@
       });
 
       if (currentBuildingSide === 'female') {
-        for (let b = 0; b < 14; b++) {
+        [
+          [-5.6, 3.30, -4.5], [-5.2, 3.38, -2.0], [-5.6, 3.30, 1.2], [-5.2, 3.35, 3.6],
+          [5.6, 3.30, -4.5], [5.2, 3.38, -2.0], [5.6, 3.30, 1.2], [5.2, 3.35, 3.6]
+        ].forEach(([bx, by, bz], b) => {
           const balloon = new THREE.Mesh(
-            new THREE.SphereGeometry(0.24, 14, 14),
+            new THREE.SphereGeometry(0.22, 14, 14),
             new THREE.MeshStandardMaterial({ color: 0xa855f7, roughness: 0.25 })
           );
-          balloon.position.set(-4.8 + b * 0.78, 3.25, -3.6 + (b % 3) * 2.5);
+          balloon.scale.set(0.92, 1.12, 0.92);
+          balloon.position.set(bx, by, bz);
           balloon.userData = { isDecorBalloon: true, colorIdx: b };
           classroomGroup.add(balloon);
-        }
+        });
+        applyPinkClassroomDecorTheme(classroomGroup, pinkDecorThemeIdx);
       } else {
         room102Teacher = createRealisticHuman({
           gender: theme.teacherGender,
           role: 'teacher',
           shirtColor: theme.teacherShirt
         });
-        const teacherSpot=clearance.find('room102 teacher',-2.3,-4.4,0.58,0.58,0.12);
-        if(teacherSpot){
-          room102Teacher.position.set(teacherSpot.x,0.16,teacherSpot.z);
-          registerCollider(teacherSpot.x,teacherSpot.z,0.55,0.55,0.10);
-        }else room102Teacher.position.set(-2.3,0.16,-4.4);
+        // Stands cleanly ON TOP of the widened 5.8m podium (left wing x = -2.15)
+        room102Teacher.position.set(-2.15, 0.16, -4.45);
+        registerCollider(-2.15, -4.45, 0.55, 0.55, 0.10);
         classroomGroup.add(room102Teacher);
         activeIdleCharacters.push({ mesh: room102Teacher, phase: 0.6 });
       }
@@ -3924,8 +4377,8 @@
         c.beginPath();c.arc(256,312,105+r*23,Math.PI*1.15,Math.PI*1.85);c.stroke();
       }
       c.textAlign='center';c.fillStyle='#fef3c7';
-      c.font='700 27px Georgia,serif';c.fillText('TẬP SAN TRI ÂN',256,128);
-      c.font='bold 78px Georgia,serif';c.fillText(String(index+1).padStart(2,'0'),256,263);
+      c.font='700 27px Inter,sans-serif';c.fillText('TẬP SAN TRI ÂN',256,128);
+      c.font='800 78px Inter,sans-serif';c.fillText(String(index+1).padStart(2,'0'),256,263);
       c.font='bold 32px Arial,sans-serif';
       const name=ANTHOLOGY_BOOKS[index].name.split(': ')[1]||ANTHOLOGY_BOOKS[index].name;
       const words=name.split(/\s+/),lines=[];let line='';
@@ -4057,20 +4510,71 @@
         6.4,
         0.58
       );
-      titleSign.position.set(0, 3.28, -5.82);
+      titleSign.position.set(0, 3.36, -5.82);
       classroomGroup.add(titleSign);
+
+      // Centerpiece gallery feature wall: museum accent panel + 2 featured back-wall artworks + track lighting
+      const featureMat = new THREE.MeshStandardMaterial({ color: 0x5c1a24, roughness: 0.82, envMapIntensity: 0.22 });
+      const featurePanel = new THREE.Mesh(new THREE.BoxGeometry(9.6, 2.05, 0.05), featureMat);
+      featurePanel.position.set(0, 1.98, -5.86);
+      classroomGroup.add(featurePanel);
+      const featureTrim = new THREE.Mesh(
+        new THREE.BoxGeometry(9.72, 0.06, 0.08),
+        new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.65, roughness: 0.28 })
+      );
+      featureTrim.position.set(0, 3.01, -5.84);
+      classroomGroup.add(featureTrim);
+      // Featured back-wall gallery paintings (clickable) so the entrance view immediately showcases the art exhibition
+      [
+        { x: -2.85, idx: 0 },
+        { x: 0.0, idx: 2 },
+        { x: 2.85, idx: 3 }
+      ].forEach(({ x, idx }) => {
+        const art = GALLERY_ARTWORKS[idx];
+        const tex = getArtCanvasTexture(art);
+        const fr = new THREE.Mesh(
+          new THREE.BoxGeometry(2.35, 1.56, 0.08),
+          new THREE.MeshStandardMaterial({ color: 0xca8a04, metalness: 0.62, roughness: 0.30 })
+        );
+        fr.position.set(x, 1.98, -5.80);
+        const pl = new THREE.Mesh(
+          new THREE.PlaneGeometry(2.15, 1.38),
+          new THREE.MeshBasicMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
+        );
+        pl.position.z = 0.05;
+        pl.userData = { interactiveType: 'view_artwork', artIndex: idx };
+        fr.add(pl);
+        classroomGroup.add(fr);
+      });
+      // Museum ceiling track light bar above feature wall
+      const trackMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.3 });
+      const trackBar = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.05, 0.06), trackMat);
+      trackBar.position.set(0, 3.68, -4.5);
+      classroomGroup.add(trackBar);
+      [-3.0, 0, 3.0].forEach(lx => {
+        const lampHead = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.08, 0.16, 10), trackMat);
+        lampHead.position.set(lx, 3.58, -4.56);
+        lampHead.rotation.x = 0.52;
+        classroomGroup.add(lampHead);
+      });
 
       const clearance=createSceneClearancePlanner(14,12);
       // Keep the main entrance unobstructed; only freestanding elements compete
       // for floor space. Wall-mounted artwork is intentionally excluded.
       clearance.reserve('main entrance',0,5.18,2.4,0.68,0.08);
-      // Decorative red carpet runner & velvet benches & plants
+      // Deep crimson carpet runner with gold border trim
       const runner = new THREE.Mesh(
         new THREE.BoxGeometry(3.2, 0.02, 8.6),
-        new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.72 })
+        new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.85, envMapIntensity: 0.18 })
       );
       runner.position.set(0, 0.01, -0.4);
       classroomGroup.add(runner);
+      const runnerGold = new THREE.Mesh(
+        new THREE.BoxGeometry(3.36, 0.014, 8.72),
+        new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.55, metalness: 0.25 })
+      );
+      runnerGold.position.set(0, 0.008, -0.4);
+      classroomGroup.add(runnerGold);
 
       [[-5.8, -5.0], [5.8, -5.0], [-5.8, 4.8], [5.8, 4.8]].forEach(([px, pz]) => {
         const plant = createPottedIndoorPlant(1.05);
@@ -4100,8 +4604,7 @@
       ];
       spots.forEach((sp) => {
         const art = GALLERY_ARTWORKS[sp.idx];
-        const tex = new THREE.TextureLoader().load(createArtCanvasDataURL(art));
-        tex.encoding = THREE.sRGBEncoding;
+        const tex = getArtCanvasTexture(art);
         const frame = new THREE.Mesh(
           new THREE.BoxGeometry(2.2, 1.5, 0.1),
           new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.4 })
@@ -4190,9 +4693,16 @@
 
       buildHallwayCorridorShell(hallway2Group, 0xe2e8f0, 2);
 
-      const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 2`, theme.signBg, theme.signBorder, '#ffffff', 5.8, 0.56);
-      banner.position.set(0, 3.45, -3.45);
+      // Suspended ceiling floor sign over clear center foyer (clear of both stairwells)
+      const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 2`, theme.signBg, theme.signBorder, '#ffffff', 5.2, 0.52);
+      banner.position.set(0, 3.36, 1.55);
       hallway2Group.add(banner);
+      const rodMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.75, roughness: 0.3 });
+      [-1.8, 1.8].forEach(rx => {
+        const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.32, 8), rodMat);
+        rod.position.set(rx, 3.74, 1.55);
+        hallway2Group.add(rod);
+      });
 
       createHallwayStairLayout(hallway2Group, 2);
 
@@ -4236,15 +4746,18 @@
 
         const confTable = new THREE.Mesh(
           new THREE.BoxGeometry(9.4, 0.14, 2.8),
-          getProceduralPBRMaterial('wood', 0x451a03, 0.3, 0.15)
+          getProceduralPBRMaterial('wood', 0x5c290c, 0.36, 0.10)
         );
         confTable.position.set(0, 0.78, -0.8);
         confTable.castShadow = true;
+        confTable.receiveShadow = true;
+        addPrecisionEdge(confTable, 0x3b1a08, 0.22);
         auditoriumGroup.add(confTable);
+        registerCollider(0, -0.8, 9.6, 3.0, 0.18);
 
         const tableBase = new THREE.Mesh(
           new THREE.BoxGeometry(7.6, 0.72, 1.4),
-          getProceduralPBRMaterial('wood', 0x78350f, 0.45)
+          getProceduralPBRMaterial('wood', 0x78350f, 0.48)
         );
         tableBase.position.set(0, 0.36, -0.8);
         auditoriumGroup.add(tableBase);
@@ -4259,14 +4772,18 @@
           const plant = createPottedIndoorPlant(1.05);
           plant.position.set(px, 0, pz);
           auditoriumGroup.add(plant);
+          registerCollider(px, pz, 0.65, 0.65, 0.12);
         });
 
         const shelfR = createBookshelfWithBooks(0xdb2777);
         shelfR.position.set(7.45, 0, -2.2);
         shelfR.rotation.y = -Math.PI / 2;
         auditoriumGroup.add(shelfR);
+        registerCollider(7.45, -2.2, 0.6, 1.6, 0.12);
 
-        const chairMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 });
+        const chairMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45, envMapIntensity: 0.28 });
+        const chairSteel = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.75, roughness: 0.28 });
+        const folderMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.55 });
         const teacherList = [
           { name: 'Thầy A • Hiệu Trưởng', x: 0, z: -2.55, rotY: 0, gender: 'male', color: 0x1e3a8a },
           { name: 'Cô B • Phó Hiệu Trưởng', x: -2.8, z: -2.55, rotY: 0, gender: 'female', color: 0xbe185d },
@@ -4276,9 +4793,31 @@
           { name: 'Cô F • Thư Ký Hội Đồng', x: 0, z: 0.95, rotY: Math.PI, gender: 'female', color: 0x0284c7 }
         ];
         teacherList.forEach((t, idx) => {
-          const execChair = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.95, 0.54), chairMat);
-          execChair.position.set(t.x, 0.48, t.z + (t.rotY === 0 ? -0.14 : 0.14));
-          auditoriumGroup.add(execChair);
+          // Proper multi-part executive armchair (does not clip into the seated teacher)
+          const chair = new THREE.Group();
+          chair.position.set(t.x, 0, t.z);
+          chair.rotation.y = t.rotY;
+          const seatPad = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.08, 0.50), chairMat);
+          seatPad.position.set(0, 0.44, 0.04);
+          const backPad = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.62, 0.08), chairMat);
+          backPad.position.set(0, 0.78, -0.22);
+          const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.40, 10), chairSteel);
+          stem.position.set(0, 0.22, 0.02);
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.05, 12), chairSteel);
+          base.position.set(0, 0.025, 0.02);
+          [-0.27, 0.27].forEach(ax => {
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.36), chairMat);
+            arm.position.set(ax, 0.64, -0.02);
+            chair.add(arm);
+          });
+          chair.add(seatPad, backPad, stem, base);
+          auditoriumGroup.add(chair);
+          registerCollider(t.x, t.z, 0.72, 0.72, 0.14);
+
+          // Meeting dossier on conference table in front of each teacher
+          const folder = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.022, 0.24), folderMat);
+          folder.position.set(t.x, 0.86, t.rotY === 0 ? -1.85 : 0.25);
+          auditoriumGroup.add(folder);
 
           const mesh = createRealisticHuman({ gender: t.gender, role: 'teacher', shirtColor: t.color, isSeated: true });
           mesh.position.set(t.x, 0, t.z);
@@ -4291,34 +4830,56 @@
           });
           auditoriumGroup.add(mesh);
           pinkRoom201Teachers.push({ mesh, phase: idx * 0.9 });
+          activeIdleCharacters.push({ mesh, phase: idx * 0.9 });
         });
       } else {
         buildRoomShell(auditoriumGroup, { width: 18, depth: 16, height: 4.8, exitType: 'exit_to_hallway2', floorType: 'wood', floorColor: 0x78350f });
 
         const stage = new THREE.Mesh(
           new THREE.BoxGeometry(13.2, 0.65, 5.0),
-          getProceduralPBRMaterial('wood', 0x451a03, 0.35)
+          getProceduralPBRMaterial('wood', 0x451a03, 0.38)
         );
         stage.position.set(0, 0.325, -5.2);
         stage.receiveShadow = true;
+        addPrecisionEdge(stage, 0xd97706, 0.25);
         auditoriumGroup.add(stage);
+        registerCollider(0, -5.2, 13.4, 5.2, 0.20);
 
-        // Crimson velvet stage curtains & top valance
-        const velvetMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.65 });
-        [-6.2, 6.2].forEach((cx) => {
-          const sideCurtain = new THREE.Mesh(new THREE.BoxGeometry(1.1, 3.8, 0.45), velvetMat);
-          sideCurtain.position.set(cx, 2.55, -7.4);
-          auditoriumGroup.add(sideCurtain);
+        // Stage front steps & glowing warm footlights
+        const stepMat = getProceduralPBRMaterial('wood', 0x6b3410, 0.45);
+        [0, 1].forEach(s => {
+          const stp = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.22, 0.40), stepMat);
+          stp.position.set(0, 0.11 + s * 0.22, -2.50 - s * 0.22);
+          auditoriumGroup.add(stp);
         });
-        const topValance = new THREE.Mesh(new THREE.BoxGeometry(13.4, 0.55, 0.5), velvetMat);
-        topValance.position.set(0, 4.35, -7.4);
-        auditoriumGroup.add(topValance);
+        const footLightMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, emissive: 0xf59e0b, emissiveIntensity: 0.65, roughness: 0.3 });
+        [-4.5, -2.25, 0, 2.25, 4.5].forEach(fx => {
+          const fl = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.07, 0.12), footLightMat);
+          fl.position.set(fx, 0.68, -2.74);
+          auditoriumGroup.add(fl);
+        });
+
+        // Pleated crimson velvet stage curtains & gilded top valance
+        const velvetMat = new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.76, envMapIntensity: 0.18 });
+        const goldValanceMat = new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.62, roughness: 0.32 });
+        [-6.2, 6.2].forEach((cx) => {
+          for (let f = -1; f <= 1; f++) {
+            const pleat = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 3.85, 12), velvetMat);
+            pleat.position.set(cx + f * 0.36, 2.55, -7.35);
+            auditoriumGroup.add(pleat);
+          }
+        });
+        const topValance = new THREE.Mesh(new THREE.BoxGeometry(13.6, 0.56, 0.52), velvetMat);
+        topValance.position.set(0, 4.38, -7.35);
+        const valanceTrim = new THREE.Mesh(new THREE.BoxGeometry(13.6, 0.08, 0.56), goldValanceMat);
+        valanceTrim.position.set(0, 4.10, -7.35);
+        auditoriumGroup.add(topValance, valanceTrim);
 
         // Stage front flower arrangements & speakers
         [-5.6, 5.6].forEach((sx) => {
           const speaker = new THREE.Mesh(
             new THREE.BoxGeometry(0.65, 1.15, 0.55),
-            new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 })
+            new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.45 })
           );
           speaker.position.set(sx, 1.22, -3.1);
           auditoriumGroup.add(speaker);
@@ -4335,14 +4896,21 @@
 
         const mcPodium = new THREE.Mesh(
           new THREE.BoxGeometry(0.95, 1.15, 0.7),
-          getProceduralPBRMaterial('wood', 0x92400e, 0.4)
+          getProceduralPBRMaterial('wood', 0x92400e, 0.42)
         );
         mcPodium.position.set(-4.6, 1.22, -3.6);
         auditoriumGroup.add(mcPodium);
+        const micNeck = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.32, 8), new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8 }));
+        micNeck.position.set(-4.6, 1.94, -3.72);
+        micNeck.rotation.x = 0.25;
+        const micHead = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 10), new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.85, roughness: 0.2 }));
+        micHead.position.set(-4.6, 2.10, -3.77);
+        auditoriumGroup.add(micNeck, micHead);
 
         const mc = createRealisticHuman({ gender: 'female', role: 'mc', shirtColor: 0xe11d48 });
         mc.position.set(-4.6, 0.65, -4.2);
         auditoriumGroup.add(mc);
+        activeIdleCharacters.push({ mesh: mc, phase: 0.5 });
 
         [-2.4, -0.8, 0.8, 2.4].forEach((px, idx) => {
           const p = createRealisticHuman({
@@ -4355,8 +4923,8 @@
           room201Performers.push(p);
         });
 
-        // Auditorium Theater Seats + Seated Teachers & Students
-        const theaterSeatMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.55 });
+        // Auditorium Theater Seats + Seated Teachers & Students + Colliders
+        const theaterSeatMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.65, envMapIntensity: 0.2 });
         [-4.2, -1.4, 1.4, 4.2].forEach((ax, idx) => {
           [-1.2, 1.2, 3.4].forEach((az, rowIdx) => {
             const seatBase = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.44, 0.55), theaterSeatMat);
@@ -4364,6 +4932,7 @@
             const seatBack = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.92, 0.14), theaterSeatMat);
             seatBack.position.set(ax, 0.46, az + 0.34);
             auditoriumGroup.add(seatBase, seatBack);
+            registerCollider(ax, az + 0.16, 0.78, 0.76, 0.12);
 
             if (rowIdx === 0) {
               const tAud = createRealisticHuman({
@@ -4425,6 +4994,7 @@
           const bench = createWoodenBench(1.9);
           bench.position.set(bx, 0, 1.8);
           auditoriumGroup.add(bench);
+          registerCollider(bx, 1.8, 1.95, 0.56, 0.12);
         });
 
         const honors = [
@@ -4433,28 +5003,41 @@
           { title: 'THẦY C', sub: 'Cờ Thi Đua Xuất Sắc • Bồi Dưỡng HSG Quốc Gia', x: 1.6 },
           { title: 'CÔ D', sub: 'Huân Chương Lao Động • Tấm Gương Sáng Tạo', x: 4.8 }
         ];
+        const trophyGoldMat = new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.78, roughness: 0.22, envMapIntensity: 0.72 });
+        const marbleBaseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.35, metalness: 0.15 });
         honors.forEach((h) => {
           const ped = new THREE.Mesh(
             new THREE.BoxGeometry(2.2, 0.55, 0.75),
-            getProceduralPBRMaterial('wood', 0x451a03, 0.4)
+            getProceduralPBRMaterial('wood', 0x451a03, 0.42)
           );
           ped.position.set(h.x, 0.275, -5.5);
           auditoriumGroup.add(ped);
+          registerCollider(h.x, -5.5, 2.25, 0.82, 0.12);
 
           const cabinet = new THREE.Mesh(
             new THREE.BoxGeometry(2.15, 1.95, 0.68),
-            new THREE.MeshPhysicalMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.35, roughness: 0.1 })
+            new THREE.MeshPhysicalMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.28, roughness: 0.10, depthWrite: false })
           );
           cabinet.position.set(h.x, 1.52, -5.5);
           cabinet.userData = { interactiveType: 'inspect_honor_plaque', honorTitle: `${h.title} — ${h.sub}` };
           auditoriumGroup.add(cabinet);
 
-          const trophy = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.24, 0.14, 0.52, 14),
-            new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.85, roughness: 0.2 })
-          );
-          trophy.position.set(h.x, 1.15, -5.5);
-          auditoriumGroup.add(trophy);
+          // Sculpted golden chalice trophy
+          const trophyGroup = new THREE.Group();
+          trophyGroup.position.set(h.x, 0.55, -5.5);
+          const tBase = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.12, 0.32), marbleBaseMat);
+          tBase.position.y = 0.06;
+          const tStem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.10, 0.28, 12), trophyGoldMat);
+          tStem.position.y = 0.26;
+          const tCup = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.09, 0.36, 16), trophyGoldMat);
+          tCup.position.y = 0.56;
+          [-0.22, 0.22].forEach(hx => {
+            const handle = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.02, 8, 14), trophyGoldMat);
+            handle.position.set(hx, 0.58, 0);
+            trophyGroup.add(handle);
+          });
+          trophyGroup.add(tBase, tStem, tCup);
+          auditoriumGroup.add(trophyGroup);
 
           const plaque = createSignBoard(`${h.title}: ${h.sub}`, '#7f1d1d', '#facc15', '#fef08a', 2.35, 0.52);
           plaque.position.set(h.x, 2.82, -5.45);
@@ -4471,6 +5054,7 @@
           st.position.set(stCfg.x, 0, stCfg.z);
           st.rotation.y = stCfg.rotY;
           auditoriumGroup.add(st);
+          registerCollider(stCfg.x, stCfg.z, 0.52, 0.52, 0.12);
           activeIdleCharacters.push({ mesh: st, phase: idx * 1.1 });
         });
       } else {
@@ -4483,14 +5067,15 @@
         // Studio platform, floral coffee table, studio cameras & softbox lights
         const studioPlatform = new THREE.Mesh(
           new THREE.BoxGeometry(6.8, 0.14, 3.2),
-          getProceduralPBRMaterial('wood', 0x78350f, 0.35)
+          getProceduralPBRMaterial('wood', 0x78350f, 0.38)
         );
         studioPlatform.position.set(0, 0.07, -3.6);
         auditoriumGroup.add(studioPlatform);
+        registerCollider(0, -3.6, 6.8, 3.2, 0.16);
 
         const coffeeTable = new THREE.Mesh(
           new THREE.BoxGeometry(1.4, 0.52, 0.7),
-          getProceduralPBRMaterial('wood', 0xb45309, 0.35)
+          getProceduralPBRMaterial('wood', 0xb45309, 0.38)
         );
         coffeeTable.position.set(0, 0.4, -3.2);
         auditoriumGroup.add(coffeeTable);
@@ -4499,15 +5084,25 @@
         studioVase.position.set(0, 0.66, -3.2);
         auditoriumGroup.add(studioVase);
 
-        // 2 Studio Cameras on Tripods + Softboxes
+        // 2 Studio Cameras on Tripods with Lenses + ON-AIR LEDs + Softboxes
         const camMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7, roughness: 0.3 });
+        const lensMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.85, roughness: 0.15 });
+        const tallyMat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xef4444, emissiveIntensity: 0.85 });
         [-2.2, 2.2].forEach((cx, idx) => {
           const tripod = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.28, 1.35, 10), camMat);
           tripod.position.set(cx, 0.68, -0.4);
+          const camGroup = new THREE.Group();
+          camGroup.position.set(cx, 1.45, -0.4);
+          camGroup.rotation.y = idx === 0 ? -0.35 : 0.35;
           const camBody = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.24, 0.48), camMat);
-          camBody.position.set(cx, 1.45, -0.4);
-          camBody.rotation.y = idx === 0 ? -0.35 : 0.35;
-          auditoriumGroup.add(tripod, camBody);
+          const camLens = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.095, 0.22, 14), lensMat);
+          camLens.rotation.x = Math.PI / 2;
+          camLens.position.z = -0.32;
+          const tallyLed = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), tallyMat);
+          tallyLed.position.set(0, 0.15, -0.18);
+          camGroup.add(camBody, camLens, tallyLed);
+          auditoriumGroup.add(tripod, camGroup);
+          registerCollider(cx, -0.4, 0.68, 0.68, 0.14);
 
           const lightStand = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.22, 2.1, 8), camMat);
           lightStand.position.set(cx * 2.1, 1.05, -2.0);
@@ -4518,17 +5113,20 @@
           softbox.position.set(cx * 2.1, 2.15, -2.0);
           softbox.rotation.y = idx === 0 ? -0.6 : 0.6;
           auditoriumGroup.add(lightStand, softbox);
+          registerCollider(cx * 2.1, -2.0, 0.65, 0.65, 0.12);
         });
 
         const reporter = createRealisticHuman({ gender: 'female', role: 'mc', shirtColor: 0x0284c7 });
         reporter.position.set(-1.3, 0.14, -3.5);
         reporter.rotation.y = 0.45;
         auditoriumGroup.add(reporter);
+        activeIdleCharacters.push({ mesh: reporter, phase: 0.4 });
 
         const interviewee = createRealisticHuman({ gender: 'male', role: 'teacher', shirtColor: 0x1e3a8a });
         interviewee.position.set(1.3, 0.14, -3.5);
         interviewee.rotation.y = -0.45;
         auditoriumGroup.add(interviewee);
+        activeIdleCharacters.push({ mesh: interviewee, phase: 1.5 });
 
         // Queue of 3 students holding bouquets waiting to share wishes on TV
         [-3.6, -2.6, -1.6].forEach((qz, idx) => {
@@ -4540,6 +5138,7 @@
           waitSt.position.set(-4.6, 0, qz);
           waitSt.rotation.y = Math.PI / 2;
           auditoriumGroup.add(waitSt);
+          registerCollider(-4.6, qz, 0.55, 0.55, 0.12);
           room202State.waitingStudents.push(waitSt);
           activeIdleCharacters.push({ mesh: waitSt, phase: idx * 0.9 });
         });
@@ -4567,8 +5166,8 @@
 
       buildHallwayCorridorShell(hallway3Group, 0xfef3c7, 3);
 
-      const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 3`, theme.signBg, theme.signBorder, '#ffffff', 5.8, 0.56);
-      banner.position.set(0, 3.45, -3.45);
+      const banner = createSignBoard(`${theme.buildingName.toUpperCase()} • TẦNG 3`, theme.signBg, theme.signBorder, '#ffffff', 4.3, 0.50);
+      banner.position.set(1.55, 3.44, -3.40);
       hallway3Group.add(banner);
 
       createHallwayStairLayout(hallway3Group, 3);
@@ -4624,17 +5223,24 @@
         banner.position.set(0, 3.35, -6.3);
         floor3RoomGroup.add(banner);
 
-        // Art tables with flower vases, benches & bookshelves
+        // Open-leg wooden art tables with flower vases & benches + colliders
+        const artWoodMat = getProceduralPBRMaterial('wood', 0x9a5828, 0.45, 0.02, 2);
         [-3.4, 3.4].forEach((tx) => {
-          const artTable = new THREE.Mesh(
-            new THREE.BoxGeometry(2.4, 0.74, 1.0),
-            getProceduralPBRMaterial('wood', 0xb45309, 0.4)
-          );
-          artTable.position.set(tx, 0.37, -1.6);
-          floor3RoomGroup.add(artTable);
+          const tg = new THREE.Group();
+          tg.position.set(tx, 0, -1.6);
+          const top = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.06, 1.0), artWoodMat);
+          top.position.y = 0.74; top.castShadow = true; top.receiveShadow = true;
+          tg.add(top);
+          for (const lx of [-1.08, 1.08]) for (const lz of [-0.42, 0.42]) {
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.72, 0.065), artWoodMat);
+            leg.position.set(lx, 0.36, lz); leg.castShadow = true;
+            tg.add(leg);
+          }
+          floor3RoomGroup.add(tg);
+          registerCollider(tx, -1.6, 2.45, 1.05, 0.14);
 
           const vase = createFlowerVase(0xdb2777);
-          vase.position.set(tx, 0.74, -1.6);
+          vase.position.set(tx, 0.77, -1.6);
           floor3RoomGroup.add(vase);
         });
 
@@ -4642,13 +5248,14 @@
           const bench = createWoodenBench(1.9);
           bench.position.set(bx, 0, 1.6);
           floor3RoomGroup.add(bench);
+          registerCollider(bx, 1.6, 1.95, 0.54, 0.12);
         });
 
         for (let i = 0; i < 4; i++) {
           const fx = -4.8 + i * 3.2;
           const frame = new THREE.Mesh(
             new THREE.BoxGeometry(2.3, 1.65, 0.12),
-            new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.65, roughness: 0.25 })
+            new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.65, roughness: 0.28 })
           );
           frame.position.set(fx, 1.95, -6.28);
 
@@ -4669,7 +5276,7 @@
 
           const artMesh = new THREE.Mesh(
             new THREE.PlaneGeometry(2.1, 1.45),
-            new THREE.MeshBasicMaterial({ map: placeholderTex })
+            new THREE.MeshBasicMaterial({ map: pink301SavedSlots[i] || placeholderTex })
           );
           artMesh.position.z = 0.07;
           artMesh.userData = { interactiveType: 'open_pink301_modal', slotIndex: i };
@@ -4688,6 +5295,7 @@
           st.position.set(s.x, 0, s.z);
           st.rotation.y = s.rotY;
           floor3RoomGroup.add(st);
+          registerCollider(s.x, s.z, 0.55, 0.55, 0.12);
           activeIdleCharacters.push({ mesh: st, phase: idx * 1.3 });
         });
       } else {
@@ -4695,45 +5303,95 @@
         banner.position.set(0, 3.35, -6.3);
         floor3RoomGroup.add(banner);
 
-        // Reception table & 4 glass keepsake pedestals (fountain pen, chalk box, lesson notebook, medal)
-        const recTable = new THREE.Mesh(
-          new THREE.BoxGeometry(2.2, 0.78, 0.85),
-          getProceduralPBRMaterial('wood', 0xb45309, 0.4)
-        );
-        recTable.position.set(2.1, 0.39, -4.4);
-        floor3RoomGroup.add(recTable);
-        registerCollider(2.1,-4.4,2.2,0.85,0.14);
+        // Open-leg reception table & 4 glass keepsake pedestals with recognizable sculpted 3D keepsakes
+        const recWood = getProceduralPBRMaterial('wood', 0x9a5828, 0.44);
+        const recTableGroup = new THREE.Group();
+        recTableGroup.position.set(2.1, 0, -4.4);
+        const recTop = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.06, 0.85), recWood);
+        recTop.position.y = 0.78; recTop.castShadow = true; recTop.receiveShadow = true;
+        recTableGroup.add(recTop);
+        for (const lx of [-0.98, 0.98]) for (const lz of [-0.34, 0.34]) {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.76, 0.06), recWood);
+          leg.position.set(lx, 0.38, lz); leg.castShadow = true;
+          recTableGroup.add(leg);
+        }
+        floor3RoomGroup.add(recTableGroup);
+        registerCollider(2.1, -4.4, 2.25, 0.9, 0.14);
 
         const recVase = createFlowerVase(0x0284c7);
-        recVase.position.set(2.3, 0.78, -4.4);
+        recVase.position.set(2.4, 0.81, -4.4);
         floor3RoomGroup.add(recVase);
 
-        const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.36, roughness: 0.08 });
+        const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.28, roughness: 0.08, depthWrite: false });
+        const velvetPadMat = new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.85 });
+        const goldRelicMat = new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.80, roughness: 0.22 });
         [-3.6, -1.2, 1.2, 3.6].forEach((kx, kIdx) => {
           const ped = new THREE.Mesh(
             new THREE.BoxGeometry(1.1, 0.95, 0.9),
-            getProceduralPBRMaterial('wood', 0x451a03, 0.4)
+            getProceduralPBRMaterial('wood', 0x451a03, 0.42)
           );
           ped.position.set(kx, 0.475, -1.2);
+          ped.castShadow = true; ped.receiveShadow = true;
+          addPrecisionEdge(ped, 0xca8a04, 0.25);
           floor3RoomGroup.add(ped);
-          registerCollider(kx,-1.2,1.1,0.9,0.08);
+          registerCollider(kx, -1.2, 1.15, 0.95, 0.10);
+
+          const pad = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.05, 0.56), velvetPadMat);
+          pad.position.set(kx, 0.975, -1.2);
+          floor3RoomGroup.add(pad);
 
           const glassBox = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.75, 0.75), glassMat);
           glassBox.position.set(kx, 1.32, -1.2);
           floor3RoomGroup.add(glassBox);
 
-          const relic = new THREE.Mesh(
-            new THREE.BoxGeometry(0.36, 0.14, 0.26),
-            new THREE.MeshStandardMaterial({ color: kIdx % 2 === 0 ? 0xfacc15 : 0x38bdf8, metalness: 0.65 })
-          );
-          relic.position.set(kx, 1.06, -1.2);
-          floor3RoomGroup.add(relic);
+          // 4 distinct recognizable keepsakes: Fountain Pen, Chalk Box, Open Lesson Plan, 20/11 Gold Medal
+          const relicGroup = new THREE.Group();
+          relicGroup.position.set(kx, 1.02, -1.2);
+          if (kIdx === 0) {
+            // Golden fountain pen
+            const penBody = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.025, 0.44, 12), new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.25, metalness: 0.35 }));
+            penBody.rotation.z = Math.PI / 2; penBody.position.y = 0.04;
+            const penNib = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.10, 10), goldRelicMat);
+            penNib.rotation.z = -Math.PI / 2; penNib.position.set(0.27, 0.04, 0);
+            const penRing = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.04, 12), goldRelicMat);
+            penRing.rotation.z = Math.PI / 2; penRing.position.set(0.06, 0.04, 0);
+            relicGroup.add(penBody, penNib, penRing);
+          } else if (kIdx === 1) {
+            // Wooden box of white & pastel chalk sticks
+            const cBox = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.24), getProceduralPBRMaterial('wood', 0x92400e, 0.55));
+            cBox.position.y = 0.06;
+            relicGroup.add(cBox);
+            [0xffffff, 0xfef08a, 0x93c5fd, 0xfda4af, 0x86efac].forEach((cc, ci) => {
+              const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.18, 8), new THREE.MeshStandardMaterial({ color: cc, roughness: 0.92 }));
+              stick.rotation.z = Math.PI / 2;
+              stick.position.set(0, 0.14, -0.07 + ci * 0.035);
+              relicGroup.add(stick);
+            });
+          } else if (kIdx === 2) {
+            // Open vintage lesson plan book
+            const cover = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.03, 0.32), new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.6 }));
+            cover.position.y = 0.02;
+            const leftPg = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.04, 0.29), new THREE.MeshStandardMaterial({ color: 0xfffbeb, roughness: 0.88 }));
+            leftPg.position.set(-0.11, 0.05, 0); leftPg.rotation.z = -0.06;
+            const rightPg = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.04, 0.29), new THREE.MeshStandardMaterial({ color: 0xfffbeb, roughness: 0.88 }));
+            rightPg.position.set(0.11, 0.05, 0); rightPg.rotation.z = 0.06;
+            relicGroup.add(cover, leftPg, rightPg);
+          } else {
+            // Golden 20/11 Medal on crimson ribbon
+            const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.32), new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.6 }));
+            ribbon.position.set(0, 0.02, -0.06);
+            const medal = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.03, 20), goldRelicMat);
+            medal.position.set(0, 0.04, 0.08);
+            relicGroup.add(ribbon, medal);
+          }
+          floor3RoomGroup.add(relicGroup);
         });
 
         [-2.2, 2.2].forEach((bx) => {
           const bench = createWoodenBench(1.9);
           bench.position.set(bx, 0, 1.8);
           floor3RoomGroup.add(bench);
+          registerCollider(bx, 1.8, 1.95, 0.54, 0.12);
         });
 
         room301Teacher = createRealisticHuman({
@@ -4746,6 +5404,7 @@
           if (c.isMesh) c.userData.interactiveType = 'gift_teacher_301';
         });
         floor3RoomGroup.add(room301Teacher);
+        activeIdleCharacters.push({ mesh: room301Teacher, phase: 0.3 });
 
         // 2 Students admiring keepsake cases
         [
@@ -4756,6 +5415,7 @@
           st.position.set(s.x, 0, s.z);
           st.rotation.y = s.rotY;
           floor3RoomGroup.add(st);
+          registerCollider(s.x, s.z, 0.55, 0.55, 0.12);
           activeIdleCharacters.push({ mesh: st, phase: idx * 1.5 });
         });
 
@@ -4769,8 +5429,7 @@
         ];
         photoSpots.forEach((sp) => {
           const item = ROOM301_PHOTOS[sp.idx];
-          const tex = new THREE.TextureLoader().load(createArtCanvasDataURL(item));
-          tex.encoding = THREE.sRGBEncoding;
+          const tex = getArtCanvasTexture(item);
           const frame = new THREE.Mesh(
             new THREE.BoxGeometry(2.3, 1.55, 0.1),
             new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.6, roughness: 0.3 })
@@ -4801,30 +5460,72 @@
     function createCeremonialTributeTree(blossomColor = 0xf43f5e) {
       const tree = new THREE.Group();
       const pot = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.15, 0.9, 0.65, 16),
+        new THREE.CylinderGeometry(1.12, 0.86, 0.62, 18),
         getProceduralPBRMaterial('stone', 0xf8fafc, 0.35)
       );
-      pot.position.y = 0.325;
-      tree.add(pot);
-
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.18, 0.3, 2.3, 12),
-        getProceduralPBRMaterial('wood', 0x451a03, 0.7)
+      pot.position.y = 0.31;
+      pot.castShadow = true;
+      const potRim = new THREE.Mesh(
+        new THREE.TorusGeometry(1.10, 0.06, 10, 24),
+        new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.65, roughness: 0.28 })
       );
-      trunk.position.y = 1.6;
+      potRim.rotation.x = Math.PI / 2;
+      potRim.position.y = 0.62;
+      const potSoil = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.02, 1.02, 0.04, 16),
+        new THREE.MeshStandardMaterial({ color: 0x3f2305, roughness: 0.94 })
+      );
+      potSoil.position.y = 0.60;
+      tree.add(pot, potRim, potSoil);
+
+      const woodMat = getProceduralPBRMaterial('wood', 0x451a03, 0.78);
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.28, 2.25, 12), woodMat);
+      trunk.position.y = 1.62;
+      trunk.castShadow = true;
       tree.add(trunk);
 
-      const canopyMat = new THREE.MeshStandardMaterial({
-        color: blossomColor,
-        emissive: blossomColor,
-        emissiveIntensity: 0.18,
-        roughness: 0.45
+      // Sculpted organic branches radiating outward
+      [
+        [-0.55, 2.35, 0.22, 0.58, 0.18],
+        [0.58, 2.40, -0.20, -0.56, -0.16],
+        [0.10, 2.48, 0.52, -0.15, 0.55],
+        [-0.14, 2.42, -0.50, 0.16, -0.52]
+      ].forEach(([bx, by, bz, rz, rx]) => {
+        const br = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.11, 1.35, 8), woodMat);
+        br.position.set(bx, by, bz);
+        br.rotation.set(rx, 0, rz);
+        br.castShadow = true;
+        tree.add(br);
       });
-      [[0, 2.9, 0, 1.2], [-0.85, 2.55, 0.35, 0.85], [0.85, 2.55, -0.35, 0.85], [0, 2.5, 0.8, 0.8]].forEach(([cx, cy, cz, r]) => {
-        const crown = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 14), canopyMat);
+
+      const isPeach = blossomColor === 0xf43f5e;
+      const tone1 = new THREE.MeshStandardMaterial({ color: blossomColor, emissive: blossomColor, emissiveIntensity: 0.14, roughness: 0.52 });
+      const tone2 = new THREE.MeshStandardMaterial({ color: isPeach ? 0xfb7185 : 0xfde047, emissive: isPeach ? 0xf43f5e : 0xf59e0b, emissiveIntensity: 0.12, roughness: 0.50 });
+      const tone3 = new THREE.MeshStandardMaterial({ color: isPeach ? 0xfce7f3 : 0xfef9c3, roughness: 0.55 });
+      const lightsMat = new THREE.MeshBasicMaterial({ color: 0xfffbeb });
+      [
+        [0, 3.12, 0, 0.88, tone1],
+        [-0.95, 2.75, 0.35, 0.68, tone2],
+        [0.95, 2.78, -0.35, 0.70, tone2],
+        [0.15, 2.82, 0.88, 0.64, tone1],
+        [-0.25, 2.76, -0.84, 0.66, tone2],
+        [-0.52, 3.22, -0.38, 0.52, tone3],
+        [0.55, 3.18, 0.42, 0.50, tone3],
+        [0, 3.55, 0.08, 0.46, tone2]
+      ].forEach(([cx, cy, cz, r, mat]) => {
+        const crown = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 12), mat);
+        crown.scale.set(1.12, 0.85, 1.08);
         crown.position.set(cx, cy, cz);
+        crown.castShadow = true;
         tree.add(crown);
       });
+      // Delicate glowing fairy-light dots woven into the canopy
+      for (let l = 0; l < 10; l++) {
+        const a = (l / 10) * Math.PI * 2;
+        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.032, 6, 6), lightsMat);
+        orb.position.set(Math.cos(a) * (0.75 + (l % 2) * 0.38), 2.55 + (l % 3) * 0.28, Math.sin(a) * (0.75 + (l % 2) * 0.38));
+        tree.add(orb);
+      }
 
       const cardsHolder = new THREE.Group();
       tree.add(cardsHolder);
@@ -4835,25 +5536,84 @@
     function refresh302TreeHangingCards() {
       if (!room302Trees.left || !room302Trees.right) return;
       const snap = window.TributeCloud ? window.TributeCloud.getSnapshot() : { cards: [] };
+      const cordMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
       ['left', 'right'].forEach((side) => {
         const holder = room302Trees[side].userData.cardsHolder;
         if (!holder) return;
         while (holder.children.length > 0) holder.remove(holder.children[0]);
-        const list = (snap.cards || []).filter((c) => (c.treeSide || 'left') === side).slice(0, 10);
+        const list = (snap.cards || []).filter((c) => (c.treeSide || 'left') === side).slice(0, 12);
         list.forEach((c, idx) => {
           const angle = (idx / Math.max(1, list.length)) * Math.PI * 2;
+          const cardGroup = new THREE.Group();
+          const cx = Math.cos(angle) * 1.18;
+          const cy = 2.18 + (idx % 3) * 0.20;
+          const cz = Math.sin(angle) * 1.18;
+          cardGroup.position.set(cx, cy, cz);
+          cardGroup.rotation.y = angle;
+          const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.26, 4), cordMat);
+          cord.position.y = 0.24;
           const cardMesh = new THREE.Mesh(
             new THREE.BoxGeometry(0.18, 0.28, 0.02),
             new THREE.MeshStandardMaterial({
               color: side === 'left' ? 0xfef08a : 0xfda4af,
               emissive: 0xf59e0b,
-              emissiveIntensity: 0.25
+              emissiveIntensity: 0.22,
+              roughness: 0.45
             })
           );
-          cardMesh.position.set(Math.cos(angle) * 1.15, 2.25 + (idx % 3) * 0.22, Math.sin(angle) * 1.15);
-          cardMesh.rotation.y = angle;
-          holder.add(cardMesh);
+          cardGroup.add(cord, cardMesh);
+          holder.add(cardGroup);
         });
+      });
+    }
+
+    function createPink302OfferingMesh(itemType) {
+      if (itemType === 'flower') {
+        const bq = createFlowerBouquet();
+        bq.scale.set(1.4, 1.4, 1.4);
+        return bq;
+      }
+      if (itemType === 'gift') {
+        const g = new THREE.Group();
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(0.44, 0.34, 0.44),
+          new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.36 })
+        );
+        box.position.y = 0.17; box.castShadow = true;
+        const ribMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.45, roughness: 0.28 });
+        const r1 = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.35, 0.07), ribMat); r1.position.y = 0.17;
+        const r2 = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.35, 0.46), ribMat); r2.position.y = 0.17;
+        const bow = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.02, 8, 14), ribMat);
+        bow.rotation.x = Math.PI / 2; bow.position.y = 0.36;
+        g.add(box, r1, r2, bow);
+        return g;
+      }
+      // Sealed wax-stamp 20/11 envelope letter
+      const envGroup = new THREE.Group();
+      const env = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, 0.036, 0.31),
+        new THREE.MeshStandardMaterial({ color: 0xfffbeb, roughness: 0.48 })
+      );
+      env.position.y = 0.018;
+      const seal = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.042, 0.042, 0.014, 14),
+        new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.35 })
+      );
+      seal.position.set(0, 0.042, 0.02);
+      envGroup.add(env, seal);
+      return envGroup;
+    }
+
+    function renderPink302TableItems() {
+      if (!pink302TableGroup) return;
+      while (pink302TableGroup.children.length > 0) pink302TableGroup.remove(pink302TableGroup.children[0]);
+      pink302PlacedItems.forEach((itemType, idx) => {
+        const obj3d = createPink302OfferingMesh(itemType);
+        const ox = -2.06 + (idx % 5) * 1.03;
+        const oz = Math.floor(idx / 5) === 0 ? -0.55 : 0.55;
+        obj3d.position.x = ox;
+        obj3d.position.z = oz;
+        pink302TableGroup.add(obj3d);
       });
     }
 
@@ -4913,6 +5673,9 @@
         pink302TableGroup = new THREE.Group();
         pink302TableGroup.position.set(0, 0.94, -2.2);
         floor3RoomGroup.add(pink302TableGroup);
+        renderPink302TableItems();
+
+        [-4.2, 4.2].forEach((bx) => registerCollider(bx, 1.5, 2.05, 0.56, 0.12));
 
         // Teacher & Students welcoming guests at the offering table
         const hostTeacher = createRealisticHuman({ gender: 'female', role: 'teacher', shirtColor: 0xbe185d });
@@ -4945,27 +5708,37 @@
           const plant = createPottedIndoorPlant(1.05);
           plant.position.set(px, 0, pz);
           floor3RoomGroup.add(plant);
+          registerCollider(px, pz, 0.65, 0.65, 0.10);
         });
 
-        // Wishing desks with calligraphy scrolls & wooden benches
+        // 4-legged wishing desks with flower vases
+        const wishWood = getProceduralPBRMaterial('wood', 0x9a5828, 0.45);
         [-3.6, 3.6].forEach((wx) => {
-          const wishDesk = new THREE.Mesh(
-            new THREE.BoxGeometry(2.2, 0.74, 0.9),
-            getProceduralPBRMaterial('wood', 0xb45309, 0.4)
-          );
-          wishDesk.position.set(wx, 0.37, 1.4);
-          registerCollider(wx,1.4,2.2,0.9,0.15);
-          wishDesk.userData = { interactiveType: 'open_tribute_tree', treeSide: wx < 0 ? 'left' : 'right' };
-          floor3RoomGroup.add(wishDesk);
+          const sideTag = wx < 0 ? 'left' : 'right';
+          const wg = new THREE.Group();
+          wg.position.set(wx, 0, 1.4);
+          const wTop = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.06, 0.9), wishWood);
+          wTop.position.y = 0.74; wTop.castShadow = true; wTop.receiveShadow = true;
+          wTop.userData = { interactiveType: 'open_tribute_tree', treeSide: sideTag };
+          wg.add(wTop);
+          for (const lx of [-0.98, 0.98]) for (const lz of [-0.36, 0.36]) {
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.72, 0.06), wishWood);
+            leg.position.set(lx, 0.36, lz); leg.castShadow = true;
+            leg.userData = { interactiveType: 'open_tribute_tree', treeSide: sideTag };
+            wg.add(leg);
+          }
+          floor3RoomGroup.add(wg);
+          registerCollider(wx, 1.4, 2.25, 0.95, 0.15);
 
           const vase = createFlowerVase(wx < 0 ? 0xf43f5e : 0xfacc15);
-          vase.position.set(wx + 0.65, 0.74, 1.4);
+          vase.position.set(wx + 0.65, 0.77, 1.4);
           floor3RoomGroup.add(vase);
         });
 
         const centerBench = createWoodenBench(2.4);
         centerBench.position.set(0, 0, -4.4);
         floor3RoomGroup.add(centerBench);
+        registerCollider(0, -4.4, 2.45, 0.56, 0.14);
 
         const leftTree = createCeremonialTributeTree(0xf43f5e);
         leftTree.position.set(-3.6, 0, -2.0);
@@ -4976,6 +5749,7 @@
           }
         });
         floor3RoomGroup.add(leftTree);
+        registerCollider(-3.6, -2.0, 2.25, 2.25, 0.14);
 
         const rightTree = createCeremonialTributeTree(0xfacc15);
         rightTree.position.set(3.6, 0, -2.0);
@@ -4986,6 +5760,7 @@
           }
         });
         floor3RoomGroup.add(rightTree);
+        registerCollider(3.6, -2.0, 2.25, 2.25, 0.14);
 
         // Students writing & hanging cards on the 2 Tribute Trees
         [
@@ -4997,6 +5772,7 @@
           st.position.set(s.x, 0, s.z);
           st.rotation.y = s.rotY;
           floor3RoomGroup.add(st);
+          registerCollider(s.x, s.z, 0.55, 0.55, 0.12);
           activeIdleCharacters.push({ mesh: st, phase: idx * 1.1 });
         });
 
@@ -5017,6 +5793,43 @@
     // =========================================================================
     // 10. SCENE SWITCHING & WALK / DOOR / STAIR SEQUENCES
     // =========================================================================
+    function clearGiftBloomParticles() {
+      giftBloomParticles.forEach(p => {
+        if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh);
+      });
+      giftBloomParticles = [];
+    }
+
+    function spawnGiftBloomParticles(origin, parentGroup) {
+      clearGiftBloomParticles();
+      const targetParent = parentGroup || scene;
+      const geo = new THREE.PlaneGeometry(0.11, 0.08);
+      const colors = [0xfacc15, 0xf43f5e, 0xfda4af, 0xfef08a, 0xfb7185, 0xffffff];
+      for (let i = 0; i < 36; i++) {
+        const mat = new THREE.MeshBasicMaterial({
+          color: colors[i % colors.length],
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.95
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        const angle = (i / 36) * Math.PI * 2 + Math.random() * 0.3;
+        const speed = 0.7 + Math.random() * 1.4;
+        mesh.position.set(origin.x, origin.y + 1.35, origin.z + 0.35);
+        targetParent.add(mesh);
+        giftBloomParticles.push({
+          mesh,
+          vx: Math.cos(angle) * speed,
+          vy: 1.4 + Math.random() * 1.7,
+          vz: Math.sin(angle) * speed,
+          spinX: (Math.random() - 0.5) * 7,
+          spinY: (Math.random() - 0.5) * 7,
+          age: 0,
+          life: 2.2 + Math.random() * 0.9
+        });
+      }
+    }
+
     function applyInteriorCameraView(preservePose = false) {
       if (!roomHero || !camera || !controls) return;
       if (isFirstPersonPOV) {
@@ -5030,14 +5843,23 @@
         controls.enabled = true;
         controls.enablePan = false;
         controls.enableZoom = true;
-        controls.minDistance = 2.2;
-        controls.maxDistance = sceneMode.startsWith('hallway') ? 7 : 5.6;
+        controls.minDistance = 2.0;
+        controls.maxDistance = sceneMode.startsWith('hallway') ? 8.5 : Math.max(6.2, activeRoomSpec.depth * 0.58);
         controls.minPolarAngle = 0.12;
         controls.maxPolarAngle = Math.PI * 0.47;
         if (!preservePose || cameraState.overviewScene !== sceneMode) {
           const hall = sceneMode.startsWith('hallway');
-          cameraState.overview.position.set(hall ? roomHero.position.x - 2.65 : 0, hall ? 3.05 : 2.7, hall ? 3.0 : 4.25);
-          cameraState.overview.target.set(hall ? roomHero.position.x : 0, 1.4, hall ? 0.25 : -1.8);
+          if (hall) {
+            const camX = THREE.MathUtils.clamp(roomHero.position.x - 1.55, -10.5, 9.5);
+            const tgtX = THREE.MathUtils.clamp(roomHero.position.x - 0.85, -9.5, 9.5);
+            cameraState.overview.position.set(camX, 2.52, 3.18);
+            cameraState.overview.target.set(tgtX, 1.48, -2.25);
+          } else {
+            const camZ = sceneMode === 'room103' ? 5.15 : Math.min(activeRoomSpec.depth / 2 - 1.15, 6.2);
+            const camY = sceneMode === 'room201' ? 3.15 : 2.68;
+            cameraState.overview.position.set(0, camY, camZ);
+            cameraState.overview.target.set(0, 1.48, -2.1);
+          }
           cameraState.overviewScene = sceneMode;
         }
         camera.position.copy(cameraState.overview.position);
@@ -5058,7 +5880,6 @@
     }
 
     function switchSceneMode(mode) {
-      // Dispose room 102's slide texture when leaving the board behind.
       if (sceneMode === 'room102' && mode !== 'room102' && room102SlideState) {
         room102SlideState.texture?.dispose();
         room102SlideState.pages.length = 0;
@@ -5066,19 +5887,28 @@
         room102SlidePointer = null;
         room102SlideMesh = null;
       }
-      // This is a virtual scene cut: the avatar never jumps through opaque geometry on screen.
       sceneMode = mode;
       if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); speechPlaying = false; }
       interiorColliders = [];
       heroVelocity.set(0, 0, 0);
       transitionLock = false;
-      classroomWalkAnim = exitRoomWalkAnim = stairClimbAnim = hallwayEntryAnim = campusDismountAnim = null;
+      campusEnterBuildingAnim = classroomWalkAnim = exitRoomWalkAnim = stairClimbAnim = hallwayEntryAnim = campusDismountAnim = null;
       room101GiftAnim = room301GiftAnim = null;
+      room101BoardMesh = null;
+      room101Teacher = null;
+      room102Teacher = null;
+      room103Reader = null;
+      room103ReaderBook = null;
+      room301Teacher = null;
+      pink302TableGroup = null;
       giftBloom = null;
+      clearGiftBloomParticles();
       setSceneCurtain(false);
       interactiveList = [];
       activeIdleCharacters = [];
       hideSpeechCard();
+      const tipEl = document.getElementById('hover-tooltip');
+      if (tipEl) tipEl.classList.add('hidden');
 
       campusGroup.visible = mode === 'intro' || mode === 'campus';
       hallwayGroup.visible = mode === 'hallway';
@@ -5097,6 +5927,7 @@
       const theme = getActiveBuildingTheme();
 
       if (mode === 'intro') {
+        introElapsed = 0;
         controls.enabled = true;
         if (introOverlay) introOverlay.classList.remove('hidden');
         if (mainUI) mainUI.style.opacity = '0';
@@ -5114,7 +5945,7 @@
         updatePOVButtonUI();
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
         controls.enabled = true;
-        controls.maxDistance = 44;
+        controls.maxDistance = 48;
         controls.minDistance = 4;
         controls.enablePan = true;
         if (backBtn) backBtn.classList.add('hidden');
@@ -5122,27 +5953,36 @@
         setClassroomControls([]);
         updateHeaderStatus('Khuôn Viên Tri Ân 20/11');
         if (campusGroup.children.length === 0) buildCampusScene();
+        // Reset entrance doors to closed whenever returning to campus
+        [campusGroup.userData.teacherBuilding, campusGroup.userData.femaleBuilding].forEach(b => {
+          if (b?.userData?.entranceDoors) {
+            b.userData.entranceDoors.left.rotation.y = 0;
+            b.userData.entranceDoors.right.rotation.y = 0;
+          }
+        });
         // Scooter -> campus: detach and animate exactly the same student.
-        // The motorcycle stays parked and visibly empty after dismount.
         const arrivingFromScooter = campusHero?.parent === campusScooterGroup;
+        if (campusScooterGroup) campusScooterGroup.position.z = 13.5;
         campusHero = setProtagonistPose('walking', true);
         if (campusHero.parent !== campusGroup) {
           campusGroup.add(campusHero);
-          const scooterZ = campusScooterGroup?.position.z ?? 18;
-          const initialZ = arrivingFromScooter ? scooterZ + 0.06 : 17.6;
-          campusHero.position.set(arrivingFromScooter ? 0.03 : 0.85, 0.14, initialZ);
+          const scooterZ = campusScooterGroup?.position.z ?? 13.5;
+          const initialZ = arrivingFromScooter ? scooterZ + 0.06 : 13.1;
+          campusHero.position.set(arrivingFromScooter ? 0.03 : 0.92, 0.14, initialZ);
           campusHero.rotation.y = Math.PI;
           if (arrivingFromScooter) {
             campusDismountAnim = { elapsed: 0, duration: 1.05,
               startX: 0.03, startZ: initialZ,
-              endX: 0.85, endZ: scooterZ - 0.40 };
+              endX: 0.92, endZ: scooterZ - 0.45 };
           }
         }
         campusGroup.traverse((o) => {
           if (o.isMesh && o.userData && o.userData.interactiveType) interactiveList.push(o);
         });
-        camera.position.set(0, 12.5, 33);
-        controls.target.set(0, 2.5, 4);
+        // Elevated cinematic campus establishing shot: clears welcome gate roof so hero, scooter, fountain & both buildings shine!
+        camera.position.set(0, 16.8, 35.5);
+        controls.target.set(0, 2.6, 5.5);
+        controls.update();
         return;
       }
 
@@ -5166,13 +6006,13 @@
           setClassroomControls([
             { label: '💬 Trò Chuyện Các Bạn', onClick: () => triggerTalkDecorStudent() },
             { label: '🎨 Đổi Tông Trang Trí', onClick: () => { pinkDecorThemeIdx++; applyPinkClassroomDecorTheme(classroomGroup, pinkDecorThemeIdx); playChime(660, 0.16); } },
-            { label: '✍️ Viết Lên Bảng Xanh', onClick: () => document.getElementById('chalkboard-modal').classList.remove('hidden') },
+            { label: '✍️ Viết Lên Bảng Xanh', onClick: () => openChalkboardModal() },
             { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway', -9.2) }
           ]);
         } else {
           setClassroomControls([
             { label: '💐 Tặng Hoa Thầy/Cô', onClick: () => triggerRoom101Gift() },
-            { label: '✍️ Viết Lên Bảng Xanh', onClick: () => document.getElementById('chalkboard-modal').classList.remove('hidden') },
+            { label: '✍️ Viết Lên Bảng Xanh', onClick: () => openChalkboardModal() },
             { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway', -9.2) }
           ]);
         }
@@ -5180,6 +6020,8 @@
         buildRoom102();
         updateHeaderStatus(`${theme.shortName} • Phòng 102`);
         const list = [
+          { label: '◀ Slide Trước', onClick: () => { changeRoom102Slide(-1); playChime(520, 0.10); } },
+          { label: 'Slide Sau ▶', onClick: () => { changeRoom102Slide(1); playChime(580, 0.10); } },
           { label: '📰 Đọc Báo Tường', onClick: () => document.getElementById('magazine-modal').classList.remove('hidden') },
           { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway', -4.6) }
         ];
@@ -5260,7 +6102,7 @@
         updateHeaderStatus(`${theme.shortName} • Phòng 302`);
         if (currentBuildingSide === 'female') {
           setClassroomControls([
-            { label: '🎁 Đặt Hoa / Quà / Thư (5k)', onClick: () => document.getElementById('pink-302-modal').classList.remove('hidden') },
+            { label: '🎁 Đặt Hoa / Quà / Thư (Miễn phí)', onClick: () => document.getElementById('pink-302-modal').classList.remove('hidden') },
             { label: '🚪 Ra Hành Lang', onClick: () => startExitRoomWalk('hallway3', 6.8) }
           ]);
         } else {
@@ -5274,23 +6116,30 @@
       applyInteriorCameraView();
     }
 
+    function openChalkboardModal() {
+      const err = document.getElementById('chalk-error-msg');
+      if (err) err.classList.add('hidden');
+      document.getElementById('chalkboard-modal')?.classList.remove('hidden');
+      document.getElementById('chalk-wish-input')?.focus();
+    }
+
     function startEnterBuildingSequence(side) {
       if (activeTransition()) return;
       currentBuildingSide = side;
       lastExitedDoorX = 0;
       if (sceneMode !== 'campus') switchSceneMode('campus');
-      const targetX = side === 'female' ? 8.6 : -8.6;
-      const targetZ = -2.0;
-      // Walk from the current dismount position. Hiding scooterRiderMesh
-      // would hide campusHero as well: they now refer to the SAME mesh.
-      const startX = campusHero?.position.x ?? 0.85;
-      const startZ = campusHero?.position.z ?? 17.6;
+      const sign = side === 'female' ? 1 : -1;
+      const startX = campusHero?.position.x ?? 0.92;
+      const startZ = campusHero?.position.z ?? 13.1;
+      // Clear courtyard waypoints that go cleanly around the fountain & flower beds
+      const waypoints = [[startX, startZ]];
+      if (startZ > 6.5) {
+        waypoints.push([sign * 4.4, 7.2]);
+      }
+      waypoints.push([sign * 4.9, -2.0], [sign * 8.6, -2.0]);
       campusEnterBuildingAnim = {
         progress: 0,
-        startX,
-        startZ,
-        targetX,
-        targetZ,
+        waypoints,
         side
       };
       playChime(580, 0.16);
@@ -5299,13 +6148,14 @@
     function startExitBuildingToCampus() {
       const side = currentBuildingSide;
       switchSceneMode('campus');
-      const outX = side === 'female' ? 8.4 : -8.4;
+      const outX = side === 'female' ? 8.2 : -8.2;
       if (campusHero) {
         campusHero.position.set(outX, 0.14, -2.0);
-        campusHero.rotation.y = 0;
+        campusHero.rotation.y = side === 'female' ? -Math.PI / 2 : Math.PI / 2;
       }
-      camera.position.set(outX * 0.5, 4.2, 8.5);
-      controls.target.set(outX, 1.8, -2.0);
+      camera.position.set(0, 15.8, 34.0);
+      controls.target.set(outX * 0.35, 2.6, 3.0);
+      controls.update();
       playChime(460, 0.15);
     }
 
@@ -5322,12 +6172,14 @@
             ? hallway2Group.userData.doors
             : hallway3Group.userData.doors;
       const doorKey = targetRoomMode.replace('room', 'enter_');
+      // Stay in the open front corridor lane (z = 1.88) while traversing horizontally past stairwells
+      const laneZ = Math.max(1.88, Math.min(2.6, roomHero.position.z));
       classroomWalkAnim = {
         progress: 0,
         startX: roomHero.position.x,
         startZ: roomHero.position.z,
+        laneZ,
         doorX,
-        pathMidZ: Math.max(-0.75, roomHero.position.z - 0.25),
         targetRoomMode,
         pivots: doorsMap ? doorsMap[doorKey] : null
       };
@@ -5336,7 +6188,7 @@
 
     function startExitRoomWalk(targetHallwayMode, exitDoorX) {
       if (activeTransition()) return;
-      lastExitedDoorX = exitDoorX;
+      lastExitedDoorX = Number.isFinite(exitDoorX) ? exitDoorX : (ROOM_DOOR_X[sceneMode] || -9.2);
       const exitPivots =
         classroomGroup.visible
           ? classroomGroup.userData.exitDoorPivots
@@ -5351,6 +6203,7 @@
         progress: 0,
         startX: roomHero.position.x,
         startZ: roomHero.position.z,
+        targetZ: activeRoomSpec.depth / 2 - 0.32,
         targetHallwayMode,
         pivots: exitPivots
       };
@@ -5451,15 +6304,30 @@
       if (g.stage === 'walk') {
         const t = smooth01(g.stageTime / g.walkDuration);
         g.progress = t * 0.48;
-        roomHero.position.x = THREE.MathUtils.lerp(g.startX, g.targetX, t);
-        roomHero.position.z = THREE.MathUtils.lerp(g.startZ, g.targetZ, t);
-        roomHero.rotation.y = THREE.MathUtils.lerp(roomHero.rotation.y, Math.PI, Math.min(1, dt * 7));
+        // 2-phase central-aisle routing so hero never cuts diagonally through desks
+        const aisleSplit = Math.abs(g.startX) > 1.0 ? 0.36 : 0.0;
+        let nx, nz;
+        if (aisleSplit > 0 && t < aisleSplit) {
+          const u = smooth01(t / aisleSplit);
+          nx = THREE.MathUtils.lerp(g.startX, 0, u);
+          nz = g.startZ;
+        } else {
+          const u = aisleSplit > 0 ? smooth01((t - aisleSplit) / (1 - aisleSplit)) : t;
+          nx = aisleSplit > 0 ? 0 : THREE.MathUtils.lerp(g.startX, g.targetX, u);
+          nz = THREE.MathUtils.lerp(g.startZ, g.targetZ, u);
+        }
+        const dx = nx - roomHero.position.x, dz = nz - roomHero.position.z;
+        roomHero.position.x = nx;
+        roomHero.position.z = nz;
+        const desiredYaw = Math.hypot(dx, dz) > 0.002 ? Math.atan2(dx, dz) : Math.PI;
+        const dyaw = ((desiredYaw - roomHero.rotation.y + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+        roomHero.rotation.y += dyaw * Math.min(1, dt * 9);
         animateHumanWalk(roomHero, elapsed, 8, dt);
-        // The bouquet stays in the student's hand, held in front of the body.
         if (pupil.rightArm) pupil.rightArm.rotation.x = -0.38;
         if (pupil.bouquetMesh) pupil.bouquetMesh.visible = true;
         if (g.stageTime >= g.walkDuration) {
           roomHero.position.set(g.targetX, roomHero.position.y, g.targetZ);
+          roomHero.rotation.y = Math.PI;
           resetHeroMotion();
           g.stage = 'offer';
           g.stageTime = 0;
@@ -5480,12 +6348,12 @@
           showSpeechCard('Học sinh • Lời tri ân', g.studentLine);
           speakVietnamese(g.studentLine, () => { g.studentDone = true; });
         }
-        // Keep the bouquet in the pupil's hand while the pupil is speaking.
         if (g.stageTime >= 1.65 && (g.studentDone || g.stageTime >= 7.5)) {
           g.delivered = true;
           if (pupil.bouquetMesh) pupil.bouquetMesh.visible = false;
           if (teacher.bouquetMesh) teacher.bouquetMesh.visible = true;
           giftBloom = { time: 0, origin: g.teacher.position.clone() };
+          spawnGiftBloomParticles(g.teacher.position, g.teacher.parent);
           playChime(820, 0.18);
           g.stage = 'receive';
           g.stageTime = 0;
@@ -5535,47 +6403,72 @@
       );
     }
 
+    let customChalkTexture = null;
     function updateRoom101ChalkboardWish(wishText) {
       if (!room101BoardMesh) return;
-      const tex = makeCanvasTexture(`board_101_custom_${Date.now()}`, 1024, 384, (ctx, w, h) => {
-        ctx.fillStyle = '#064e3b';
-        ctx.fillRect(0, 0, w, h);
-        ctx.strokeStyle = '#d97706';
-        ctx.lineWidth = 14;
-        ctx.strokeRect(8, 8, w - 16, h - 16);
-        ctx.fillStyle = '#fef9c3';
-        ctx.font = '800 36px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('LỜI CHÚC TRI ÂN 20/11 TRÊN BẢNG XANH', w / 2, 95);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '700 30px Inter, sans-serif';
-        const line1 = wishText.slice(0, 44);
-        const line2 = wishText.slice(44, 92);
-        ctx.fillText(`“${line1}${line2 ? '' : '”'}`, w / 2, 185);
-        if (line2) {
-          ctx.fillText(`${line2}”`, w / 2, 235);
-        }
-        ctx.fillStyle = '#6ee7b7';
-        ctx.font = '600 22px Inter, sans-serif';
-        ctx.fillText('— Tập Thể Học Sinh Kính Tặng Quý Thầy Cô —', w / 2, 315);
-      });
-      room101BoardMesh.material.map = tex;
-      room101BoardMesh.material.needsUpdate = true;
+      if (customChalkTexture) {
+        customChalkTexture.dispose();
+        customChalkTexture = null;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280; canvas.height = 480;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width, h = canvas.height;
+      const bg = ctx.createRadialGradient(w * 0.5, h * 0.45, 40, w * 0.5, h * 0.5, w * 0.65);
+      bg.addColorStop(0, '#0a5c44');
+      bg.addColorStop(1, '#043829');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(32, 28, w - 64, h - 56);
+      ctx.fillStyle = '#fef9c3';
+      ctx.font = '800 38px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('LỜI CHÚC TRI ÂN 20/11 TRÊN BẢNG XANH', w / 2, 110, w - 120);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 32px Inter, sans-serif';
+      const lines = slideWrapLines(ctx, `“${wishText}”`, w - 180, 3);
+      const startY = lines.length === 1 ? 245 : lines.length === 2 ? 215 : 188;
+      lines.forEach((ln, i) => ctx.fillText(ln, w / 2, startY + i * 52, w - 160));
+      ctx.fillStyle = '#6ee7b7';
+      ctx.font = '600 24px Inter, sans-serif';
+      ctx.fillText('— Tập Thể Học Sinh Kính Tặng Quý Thầy Cô —', w / 2, 395);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.encoding = THREE.sRGBEncoding;
+      tex.generateMipmaps = true;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      customChalkTexture = tex;
+      const faceMat = Array.isArray(room101BoardMesh.material) ? room101BoardMesh.material[4] : room101BoardMesh.material;
+      if (faceMat) {
+        faceMat.map = tex;
+        faceMat.needsUpdate = true;
+      }
     }
 
-    // In-world room 102 slide deck: render only into a reusable CanvasTexture.
+    // Properly word-wrap text up to maxLines (fills the final line and adds ellipsis only if genuinely overflowing)
     function slideWrapLines(ctx, text, maxWidth, maxLines) {
-      const words = String(text || '').trim().split(/\s+/);
+      const words = String(text || '').trim().split(/\s+/).filter(Boolean);
       const lines = [];
       let line = '';
-      for (const word of words) {
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
         const candidate = line ? line + ' ' + word : word;
         if (line && ctx.measureText(candidate).width > maxWidth) {
-          lines.push(line); line = word;
-          if (lines.length >= maxLines-1) break;
-        } else line = candidate;
+          lines.push(line);
+          if (lines.length >= maxLines) {
+            const last = lines[maxLines - 1];
+            lines[maxLines - 1] = last.length > 2 ? last.replace(/[.,;:]?$/, '…') : last + '…';
+            return lines;
+          }
+          line = word;
+        } else {
+          line = candidate;
+        }
       }
-      if (line) lines.push(line);
+      if (line && lines.length < maxLines) lines.push(line);
       return lines;
     }
 
@@ -5629,8 +6522,11 @@
       texture.encoding=THREE.sRGBEncoding;
       texture.minFilter=THREE.LinearFilter;
       texture.magFilter=THREE.LinearFilter;
-      room102SlideMesh.material.map=texture;
-      room102SlideMesh.material.needsUpdate=true;
+      const slideMat = Array.isArray(room102SlideMesh.material) ? room102SlideMesh.material[4] : room102SlideMesh.material;
+      if (slideMat) {
+        slideMat.map = texture;
+        slideMat.needsUpdate = true;
+      }
       currentSlideIdx=0;
       room102SlideState={
         canvas,ctx:canvas.getContext('2d'),texture,
@@ -5676,66 +6572,88 @@
     }
 
     function openArtworkViewer(idx) {
-      const art = GALLERY_ARTWORKS[idx % GALLERY_ARTWORKS.length];
-      document.getElementById('art-modal-title').textContent = art.title;
+      currentArtworkIdx = ((idx % GALLERY_ARTWORKS.length) + GALLERY_ARTWORKS.length) % GALLERY_ARTWORKS.length;
+      const art = GALLERY_ARTWORKS[currentArtworkIdx];
+      document.getElementById('art-modal-title').textContent = `${art.title} (${currentArtworkIdx + 1}/${GALLERY_ARTWORKS.length})`;
       document.getElementById('art-modal-desc').textContent = art.desc;
       document.getElementById('art-modal-img').src = createArtCanvasDataURL(art);
       document.getElementById('artwork-modal').classList.remove('hidden');
     }
 
     function renderAnthologySpread() {
-      const book=ANTHOLOGY_BOOKS[currentAnthologyBookIdx];
-      const page=book.pages[currentAnthologyPageIdx];
-      const words=String(page.body).split(/\s+/).filter(Boolean);
-      const mid=Math.ceil(words.length/2);
-      document.getElementById('anthology-chapter').textContent=book.name;
-      document.getElementById('anthology-title').textContent=page.title;
-      document.getElementById('anthology-body').textContent=words.slice(0,mid).join(' ');
-      document.getElementById('anthology-right-body').textContent=words.slice(mid).join(' ');
-      document.getElementById('anthology-author').textContent='— '+page.author;
-      document.getElementById('anthology-counter').textContent=
-        (currentAnthologyPageIdx+1)+' / '+book.pages.length;
-      document.getElementById('anthology-left-number').textContent=
-        String(currentAnthologyPageIdx*2+1).padStart(2,'0');
-      document.getElementById('anthology-right-number').textContent=
-        String(currentAnthologyPageIdx*2+2).padStart(2,'0');
-      document.querySelectorAll('.anthology-tab').forEach((tab,i)=>{
-        tab.classList.toggle('anthology-tab-active',i===currentAnthologyBookIdx);
-        tab.setAttribute('aria-current',i===currentAnthologyBookIdx?'page':'false');
+      const book = ANTHOLOGY_BOOKS[currentAnthologyBookIdx];
+      const page = book.pages[currentAnthologyPageIdx];
+      const rawBody = String(page.body || '').trim();
+      const rawLines = rawBody.split('\n').map(l => l.trim()).filter(Boolean);
+      let leftText = '';
+      let rightText = '';
+      if (rawLines.length >= 2) {
+        // Preserve poem & paragraph line breaks across left and right pages
+        const splitAt = Math.ceil(rawLines.length / 2);
+        leftText = rawLines.slice(0, splitAt).join('\n');
+        rightText = rawLines.slice(splitAt).join('\n');
+      } else {
+        const words = rawBody.split(/\s+/).filter(Boolean);
+        const mid = Math.ceil(words.length / 2);
+        leftText = words.slice(0, mid).join(' ');
+        rightText = words.slice(mid).join(' ');
+      }
+      document.getElementById('anthology-chapter').textContent = book.name;
+      document.getElementById('anthology-title').textContent = page.title;
+      document.getElementById('anthology-body').textContent = leftText;
+      document.getElementById('anthology-right-body').textContent = rightText;
+      document.getElementById('anthology-author').textContent = '— ' + page.author;
+      document.getElementById('anthology-counter').textContent =
+        (currentAnthologyPageIdx + 1) + ' / ' + book.pages.length;
+      document.getElementById('anthology-left-number').textContent =
+        String(currentAnthologyPageIdx * 2 + 1).padStart(2, '0');
+      document.getElementById('anthology-right-number').textContent =
+        String(currentAnthologyPageIdx * 2 + 2).padStart(2, '0');
+      document.querySelectorAll('.anthology-tab').forEach((tab, i) => {
+        tab.classList.toggle('anthology-tab-active', i === currentAnthologyBookIdx);
+        tab.setAttribute('aria-current', i === currentAnthologyBookIdx ? 'page' : 'false');
       });
     }
 
-    function openAnthologyModal(bookIdx=0,pageIdx=0) {
-      const index=(bookIdx+ANTHOLOGY_BOOKS.length)%ANTHOLOGY_BOOKS.length;
-      const book=ANTHOLOGY_BOOKS[index];
-      const target=(pageIdx%book.pages.length+book.pages.length)%book.pages.length;
-      const modal=document.getElementById('anthology-modal');
-      const shell=document.getElementById('anthology-book-shell');
-      if(!modal||!shell||anthologyTurning)return;
-      const alreadyVisible=!modal.classList.contains('hidden');
-      const sameBook=index===currentAnthologyBookIdx;
-      if(alreadyVisible&&sameBook&&currentAnthologyPageIdx!==target) {
-        anthologyTurning=true;
-        const direction=pageIdx>currentAnthologyPageIdx?1:-1;
-        shell.classList.remove('turning-next','turning-prev');
-        // Force animation reset when immediately turning multiple pages.
+    function resetAnthologyTurnState() {
+      anthologyTurnTimers.forEach(t => clearTimeout(t));
+      anthologyTurnTimers = [];
+      anthologyTurning = false;
+      const shell = document.getElementById('anthology-book-shell');
+      if (shell) shell.classList.remove('turning-next', 'turning-prev');
+    }
+
+    function openAnthologyModal(bookIdx = 0, pageIdx = 0) {
+      const index = ((bookIdx % ANTHOLOGY_BOOKS.length) + ANTHOLOGY_BOOKS.length) % ANTHOLOGY_BOOKS.length;
+      const book = ANTHOLOGY_BOOKS[index];
+      const target = ((pageIdx % book.pages.length) + book.pages.length) % book.pages.length;
+      const modal = document.getElementById('anthology-modal');
+      const shell = document.getElementById('anthology-book-shell');
+      if (!modal || !shell || anthologyTurning) return;
+      const alreadyVisible = !modal.classList.contains('hidden');
+      const sameBook = index === currentAnthologyBookIdx;
+      if (alreadyVisible && sameBook && currentAnthologyPageIdx !== target) {
+        anthologyTurning = true;
+        const direction = pageIdx > currentAnthologyPageIdx ? 1 : -1;
+        shell.classList.remove('turning-next', 'turning-prev');
         void shell.offsetWidth;
-        shell.classList.add(direction>0?'turning-next':'turning-prev');
+        shell.classList.add(direction > 0 ? 'turning-next' : 'turning-prev');
         beginRoom103PageTurn(direction);
-        setTimeout(()=>{
-          currentAnthologyPageIdx=target;
+        anthologyTurnTimers.push(setTimeout(() => {
+          currentAnthologyPageIdx = target;
           renderAnthologySpread();
-        },320);
-        setTimeout(()=>{
-          shell.classList.remove('turning-next','turning-prev');
-          anthologyTurning=false;
-        },680);
-      }else{
-        currentAnthologyBookIdx=index;
-        currentAnthologyPageIdx=target;
+        }, 320));
+        anthologyTurnTimers.push(setTimeout(() => {
+          shell.classList.remove('turning-next', 'turning-prev');
+          anthologyTurning = false;
+          anthologyTurnTimers = [];
+        }, 680));
+      } else {
+        resetAnthologyTurnState();
+        currentAnthologyBookIdx = index;
+        currentAnthologyPageIdx = target;
         renderAnthologySpread();
         modal.classList.remove('hidden');
-        shell.classList.remove('turning-next','turning-prev');
         beginRoom103PageTurn(1);
       }
     }
@@ -5743,16 +6661,52 @@
     let currentPhotoZoom = 1;
     let currentPhotoIdx301 = 0;
     function openPhotoZoomModal(idx) {
-      currentPhotoIdx301 = idx % ROOM301_PHOTOS.length;
+      currentPhotoIdx301 = ((idx % ROOM301_PHOTOS.length) + ROOM301_PHOTOS.length) % ROOM301_PHOTOS.length;
       currentPhotoZoom = 1;
       const item = ROOM301_PHOTOS[currentPhotoIdx301];
-      document.getElementById('photo-zoom-title').textContent = item.title;
+      document.getElementById('photo-zoom-title').textContent = `${item.title} (${currentPhotoIdx301 + 1}/${ROOM301_PHOTOS.length})`;
       document.getElementById('photo-zoom-desc').textContent = item.desc;
       const img = document.getElementById('photo-zoom-img');
       img.src = createArtCanvasDataURL(item);
       img.style.transform = 'scale(1)';
       document.getElementById('photo-zoom-badge').textContent = '100%';
       document.getElementById('photo-zoom-modal').classList.remove('hidden');
+    }
+
+    function syncTributeTreeChoiceUI() {
+      const leftBtn = document.getElementById('btn-select-tree-left');
+      const rightBtn = document.getElementById('btn-select-tree-right');
+      const isLeft = selectedTributeTreeSide !== 'right';
+      if (leftBtn) {
+        leftBtn.className = isLeft
+          ? 'tree-choice-btn bg-rose-500/25 border-2 border-rose-400 text-rose-200 text-xs font-bold py-2 px-2.5 rounded-xl transition'
+          : 'tree-choice-btn bg-white/5 border border-white/15 text-rose-200/80 text-xs font-semibold py-2 px-2.5 rounded-xl transition';
+      }
+      if (rightBtn) {
+        rightBtn.className = !isLeft
+          ? 'tree-choice-btn bg-amber-500/25 border-2 border-amber-400 text-amber-200 text-xs font-bold py-2 px-2.5 rounded-xl transition'
+          : 'tree-choice-btn bg-white/5 border border-white/15 text-amber-200/80 text-xs font-semibold py-2 px-2.5 rounded-xl transition';
+      }
+    }
+
+    function syncPink301TabUI() {
+      const tabPhoto = document.getElementById('tab-p301-photo');
+      const tabWish = document.getElementById('tab-p301-wish');
+      const photoPanel = document.getElementById('p301-photo-panel');
+      const wishPanel = document.getElementById('p301-wish-panel');
+      const isPhoto = pink301ActiveTab === 'photo';
+      if (photoPanel) photoPanel.classList.toggle('hidden', !isPhoto);
+      if (wishPanel) wishPanel.classList.toggle('hidden', isPhoto);
+      if (tabPhoto) {
+        tabPhoto.className = isPhoto
+          ? 'flex-1 bg-pink-500 text-slate-950 py-2 rounded-xl text-xs font-extrabold transition'
+          : 'flex-1 bg-white/10 text-white py-2 rounded-xl text-xs font-bold transition';
+      }
+      if (tabWish) {
+        tabWish.className = !isPhoto
+          ? 'flex-1 bg-pink-500 text-slate-950 py-2 rounded-xl text-xs font-extrabold transition'
+          : 'flex-1 bg-white/10 text-white py-2 rounded-xl text-xs font-bold transition';
+      }
     }
 
     function renderTributeCardsFeed() {
@@ -5791,24 +6745,26 @@
     };
 
     function openTributeTreeModal(side = 'left') {
-      selectedTributeTreeSide = side;
+      selectedTributeTreeSide = side === 'right' ? 'right' : 'left';
+      syncTributeTreeChoiceUI();
+      const err = document.getElementById('tribute-error-msg');
+      if (err) err.classList.add('hidden');
       renderTributeCardsFeed();
       document.getElementById('tribute-tree-modal').classList.remove('hidden');
     }
 
     function openPayment5kModal() {
-      // No misleading fake QR: a payment gateway and verified webhook are required.
       document.getElementById('payment-5k-modal')?.classList.remove('hidden');
     }
 
     function openPink301Modal(slotIdx = 0) {
-      pink301Frames.selectedSlot = slotIdx;
+      pink301SelectedSlot = slotIdx;
+      syncPink301TabUI();
+      const err = document.getElementById('p301-error-msg');
+      if (err) err.classList.add('hidden');
       const quotaLabel = document.getElementById('pink-301-quota-label');
       if (quotaLabel) {
-        quotaLabel.textContent =
-          pink301HangCount === 0
-            ? '🎁 Miễn phí 1 lần treo đầu tiên (Lần sau 5.000đ)'
-            : '💳 Lượt treo tiếp theo yêu cầu mở khóa 5.000đ';
+        quotaLabel.textContent = `🎁 Khung tranh số ${slotIdx + 1} • Bản demo: treo miễn phí lên cả 4 khung`;
       }
       document.getElementById('pink-301-modal').classList.remove('hidden');
     }
@@ -5817,40 +6773,63 @@
       const canvas = document.getElementById('certificate-canvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fffbeb';
+      const grad = ctx.createLinearGradient(0, 0, 900, 620);
+      grad.addColorStop(0, '#fffbeb');
+      grad.addColorStop(1, '#fef3c7');
+      ctx.fillStyle = grad;
       ctx.fillRect(0, 0, 900, 620);
 
-      ctx.strokeStyle = '#b45309';
+      // Ornate double gold frame & corner flourishes
+      ctx.strokeStyle = '#991b1b';
       ctx.lineWidth = 14;
       ctx.strokeRect(20, 20, 860, 580);
-      ctx.strokeStyle = '#f59e0b';
+      ctx.strokeStyle = '#d97706';
       ctx.lineWidth = 4;
       ctx.strokeRect(36, 36, 828, 548);
+      ctx.strokeStyle = 'rgba(217, 119, 6, 0.35)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(48, 48, 804, 524);
 
       ctx.fillStyle = '#991b1b';
       ctx.font = '800 34px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('GIẤY CHỨNG NHẬN TẤM LÒNG TRI ÂN 20/11', 450, 105);
+      ctx.fillText('GIẤY CHỨNG NHẬN TẤM LÒNG TRI ÂN 20/11', 450, 108);
+
+      ctx.fillStyle = '#d97706';
+      ctx.fillRect(260, 126, 380, 3);
 
       ctx.fillStyle = '#78350f';
-      ctx.font = '600 20px Inter, sans-serif';
-      ctx.fillText('TRÂN TRỌNG GHI NHẬN TẤM LÒNG CỦA', 450, 175);
+      ctx.font = '600 19px Inter, sans-serif';
+      ctx.fillText('TRÂN TRỌNG GHI NHẬN TẤM LÒNG CỦA', 450, 174);
 
       ctx.fillStyle = '#be185d';
       ctx.font = '800 38px Inter, sans-serif';
-      ctx.fillText((sender || 'Học Sinh Tri Ân').toUpperCase(), 450, 235);
+      ctx.fillText((sender || 'Học Sinh Tri Ân').toUpperCase(), 450, 232, 760);
 
       ctx.fillStyle = '#1e293b';
       ctx.font = '600 21px Inter, sans-serif';
-      ctx.fillText(`Đã dâng tặng ${itemLabel} kính gửi tới ${teacher || 'Quý Thầy Cô'}`, 450, 295);
+      ctx.fillText(`Đã dâng tặng ${itemLabel} kính gửi tới ${teacher || 'Quý Thầy Cô'}`, 450, 290, 760);
 
+      // Properly word-wrapped tribute note (never squishes long messages)
       ctx.fillStyle = '#475569';
-      ctx.font = 'italic 19px Inter, sans-serif';
-      ctx.fillText(`“${note || 'Kính chúc Quý Thầy Cô ngày 20/11 thật nhiều sức khỏe và hạnh phúc!'}”`, 450, 355, 760);
+      ctx.font = 'italic 20px Inter, sans-serif';
+      const noteText = `“${note || 'Kính chúc Quý Thầy Cô ngày 20/11 thật nhiều sức khỏe, niềm vui và hạnh phúc!'}”`;
+      const wrappedNote = slideWrapLines(ctx, noteText, 720, 3);
+      wrappedNote.forEach((ln, idx) => ctx.fillText(ln, 450, 348 + idx * 32));
+
+      // Golden rosette seal
+      const sealX = 760, sealY = 490;
+      ctx.fillStyle = '#dc2626';
+      ctx.beginPath(); ctx.arc(sealX, sealY, 44, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#facc15'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(sealX, sealY, 37, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#fef08a';
+      ctx.font = '800 18px Inter, sans-serif';
+      ctx.fillText('20/11', sealX, sealY + 6);
 
       ctx.fillStyle = '#b45309';
       ctx.font = '700 18px Inter, sans-serif';
-      ctx.fillText('BAN TỔ CHỨC LỄ KỶ NIỆM NGÀY NHÀ GIÁO VIỆT NAM 20/11', 450, 515);
+      ctx.fillText('BAN TỔ CHỨC LỄ KỶ NIỆM NGÀY NHÀ GIÁO VIỆT NAM 20/11', 410, 520);
     }
 
     function downloadCertificateAsPDF() {
@@ -5905,17 +6884,18 @@
       }
 
       if (sceneMode === 'intro') {
-        const progress = Math.min(1, elapsed / 4.2);
+        introElapsed += dt;
+        const progress = Math.min(1, introElapsed / 4.2);
         const bar = document.getElementById('intro-progress-bar');
         if (bar) bar.style.width = `${Math.round(progress * 100)}%`;
         if (campusScooterGroup) {
-          campusScooterGroup.position.z = 34 - progress * 16;
+          campusScooterGroup.position.z = 33 - progress * 19.5;
           scooterWheels.forEach((w) => {
             w.rotation.x -= dt * 10;
           });
         }
-        camera.position.set(Math.sin(elapsed * 0.4) * 5, 7.5 - progress * 1.5, 40 - progress * 10);
-        controls.target.set(0, 2.2, 22 - progress * 14);
+        camera.position.set(Math.sin(introElapsed * 0.45) * 4.6, 8.2 + progress * 3.8, 40 - progress * 8.5);
+        controls.target.set(0, 2.3, 21 - progress * 14);
         if (progress >= 1) {
           switchSceneMode('campus');
         }
@@ -5973,37 +6953,56 @@
         });
 
         if (campusEnterBuildingAnim && campusHero) {
-          campusEnterBuildingAnim.progress += dt * 0.48;
-          const p = Math.min(1, campusEnterBuildingAnim.progress);
-          const eased = easeInOut(p);
-          const x = THREE.MathUtils.lerp(campusEnterBuildingAnim.startX, campusEnterBuildingAnim.targetX, eased);
-          const z = THREE.MathUtils.lerp(campusEnterBuildingAnim.startZ, campusEnterBuildingAnim.targetZ, eased);
+          const anim = campusEnterBuildingAnim;
+          anim.progress = Math.min(1, anim.progress + dt * 0.42);
+          const p = anim.progress;
+          // Smooth multi-waypoint courtyard walk (avoids fountain & flower beds)
+          const pts = anim.waypoints || [[0.92, 13.1], [anim.side === 'female' ? 8.6 : -8.6, -2.0]];
+          let totalDist = 0;
+          const segLens = [];
+          for (let i = 0; i < pts.length - 1; i++) {
+            const len = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+            segLens.push(len);
+            totalDist += len;
+          }
+          const targetDist = easeInOut(p) * Math.max(0.001, totalDist);
+          let acc = 0, x = pts[pts.length - 1][0], z = pts[pts.length - 1][1], dirX = 0, dirZ = -1;
+          for (let i = 0; i < segLens.length; i++) {
+            if (targetDist <= acc + segLens[i] || i === segLens.length - 1) {
+              const localT = segLens[i] > 0.001 ? THREE.MathUtils.clamp((targetDist - acc) / segLens[i], 0, 1) : 1;
+              x = THREE.MathUtils.lerp(pts[i][0], pts[i + 1][0], localT);
+              z = THREE.MathUtils.lerp(pts[i][1], pts[i + 1][1], localT);
+              dirX = pts[i + 1][0] - pts[i][0];
+              dirZ = pts[i + 1][1] - pts[i][1];
+              break;
+            }
+            acc += segLens[i];
+          }
           campusHero.position.set(x, 0.14, z);
-          campusHero.rotation.y = Math.atan2(
-            campusEnterBuildingAnim.targetX - campusEnterBuildingAnim.startX,
-            campusEnterBuildingAnim.targetZ - campusEnterBuildingAnim.startZ
-          );
+          if (Math.hypot(dirX, dirZ) > 0.01) {
+            const desiredYaw = Math.atan2(dirX, dirZ);
+            const dyaw = ((desiredYaw - campusHero.rotation.y + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+            campusHero.rotation.y += dyaw * Math.min(1, dt * 10);
+          }
           animateHumanWalk(campusHero, elapsed, 10, dt);
 
           const bldg =
-            campusEnterBuildingAnim.side === 'female'
+            anim.side === 'female'
               ? campusGroup.userData.femaleBuilding
               : campusGroup.userData.teacherBuilding;
-          if (p > 0.65 && bldg && bldg.userData.entranceDoors) {
-            const openAngle = Math.min(1, (p - 0.65) / 0.35) * (Math.PI * 0.45);
+          if (p > 0.68 && bldg && bldg.userData.entranceDoors) {
+            const openAngle = Math.min(1, (p - 0.68) / 0.30) * (Math.PI * 0.45);
             const dir = bldg.userData.entranceDoors.outDir;
             bldg.userData.entranceDoors.left.rotation.y = dir * openAngle;
             bldg.userData.entranceDoors.right.rotation.y = -dir * openAngle;
           }
 
-          if (p > 0.85) setSceneCurtain(true);
+          if (p > 0.88) setSceneCurtain(true);
           if (p >= 1) {
             campusEnterBuildingAnim = null;
             hallwaySpawn = { kind: 'entrance' };
             switchSceneMode('hallway');
-            // Enter through the main doorway first, then take a few steps
-            // into the open lobby; do not spawn against the staircase.
-            hallwayEntryAnim = { elapsed: 0, duration: 1.5, fromZ: 2.82, toZ: 2.05 };
+            hallwayEntryAnim = { elapsed: 0, duration: 1.4, fromZ: 2.82, toZ: 2.05 };
           }
         }
       }
@@ -6023,41 +7022,69 @@
       }
       if (classroomWalkAnim && roomHero) {
         const a = classroomWalkAnim;
-        a.progress = Math.min(1,a.progress + dt/2.0);
+        a.progress = Math.min(1, a.progress + dt / 2.15);
         const p = a.progress;
-        // Move along the clear central corridor first, then approach the doorway.
-        const horizontal = smooth01(Math.min(1,p/0.66));
-        const forward = smooth01(Math.max(0,(p-0.12)/0.88));
-        roomHero.position.x = THREE.MathUtils.lerp(a.startX,a.doorX,horizontal);
-        roomHero.position.z = THREE.MathUtils.lerp(a.startZ,-3.22,forward);
-        roomHero.rotation.y = Math.atan2(a.doorX-a.startX, -3.22-a.startZ);
-        animateHumanWalk(roomHero,elapsed,9,dt);
-        if (a.pivots) {
-          const opening = smooth01((p-0.25)/0.3) * (1-smooth01((p-0.9)/0.1));
-          a.pivots.left.rotation.y = -opening*0.95;
-          a.pivots.right.rotation.y = opening*0.95;
+        // 2-phase hallway path: traverse horizontally along clear front corridor lane (clears staircases), then enter doorway
+        const split = 0.56;
+        let nx, nz;
+        if (p < split) {
+          const u = smooth01(p / split);
+          nx = THREE.MathUtils.lerp(a.startX, a.doorX, u);
+          nz = THREE.MathUtils.lerp(a.startZ, a.laneZ ?? 1.88, Math.min(1, u * 1.8));
+        } else {
+          const u = smooth01((p - split) / (1 - split));
+          nx = a.doorX;
+          nz = THREE.MathUtils.lerp(a.laneZ ?? 1.88, -3.22, u);
         }
-        if (p>0.82) setSceneCurtain(true);
-        if (p>=1) switchSceneMode(a.targetRoomMode);
+        const dx = nx - roomHero.position.x, dz = nz - roomHero.position.z;
+        roomHero.position.x = nx;
+        roomHero.position.z = nz;
+        if (Math.hypot(dx, dz) > 0.002) {
+          const desiredYaw = Math.atan2(dx, dz);
+          const dyaw = ((desiredYaw - roomHero.rotation.y + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+          roomHero.rotation.y += dyaw * Math.min(1, dt * 11);
+        }
+        animateHumanWalk(roomHero, elapsed, 9, dt);
+        if (a.pivots) {
+          const opening = smooth01((p - 0.48) / 0.25) * (1 - smooth01((p - 0.92) / 0.08));
+          a.pivots.left.rotation.y = -opening * 0.95;
+          a.pivots.right.rotation.y = opening * 0.95;
+        }
+        if (p > 0.85) setSceneCurtain(true);
+        if (p >= 1) switchSceneMode(a.targetRoomMode);
       }
       if (exitRoomWalkAnim && roomHero) {
-        const a=exitRoomWalkAnim;
-        a.progress=Math.min(1,a.progress+dt/1.9);
-        const p=a.progress;
-        // Exit via the central room door (x=0, z=+depth/2) without cutting through desks.
-        const horizontal=smooth01(Math.min(1,p/0.57));
-        const forward=smooth01(Math.max(0,(p-0.15)/0.85));
-        roomHero.position.x=THREE.MathUtils.lerp(a.startX,0,horizontal);
-        roomHero.position.z=THREE.MathUtils.lerp(a.startZ,(sceneMode==='room201'?6.25:sceneMode==='room301'?5.98:5.48),forward);
-        roomHero.rotation.y=0;
-        animateHumanWalk(roomHero,elapsed,9,dt);
-        if(a.pivots){
-          const open=smooth01((p-0.28)/0.32)*(1-smooth01((p-0.89)/0.11));
-          a.pivots.left.rotation.y=open*0.92;
-          a.pivots.right.rotation.y=-open*0.92;
+        const a = exitRoomWalkAnim;
+        a.progress = Math.min(1, a.progress + dt / 1.9);
+        const p = a.progress;
+        // 2-phase central-aisle room exit (never clips through desks)
+        const split = Math.abs(a.startX) > 0.6 ? 0.38 : 0.0;
+        let nx, nz;
+        if (split > 0 && p < split) {
+          const u = smooth01(p / split);
+          nx = THREE.MathUtils.lerp(a.startX, 0, u);
+          nz = a.startZ;
+        } else {
+          const u = split > 0 ? smooth01((p - split) / (1 - split)) : smooth01(p);
+          nx = split > 0 ? 0 : THREE.MathUtils.lerp(a.startX, 0, u);
+          nz = THREE.MathUtils.lerp(a.startZ, a.targetZ || (activeRoomSpec.depth / 2 - 0.32), u);
         }
-        if(p>0.82) setSceneCurtain(true);
-        if(p>=1) switchSceneMode(a.targetHallwayMode);
+        const dx = nx - roomHero.position.x, dz = nz - roomHero.position.z;
+        roomHero.position.x = nx;
+        roomHero.position.z = nz;
+        if (Math.hypot(dx, dz) > 0.002) {
+          const desiredYaw = Math.atan2(dx, dz);
+          const dyaw = ((desiredYaw - roomHero.rotation.y + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+          roomHero.rotation.y += dyaw * Math.min(1, dt * 11);
+        }
+        animateHumanWalk(roomHero, elapsed, 9, dt);
+        if (a.pivots) {
+          const open = smooth01((p - 0.35) / 0.30) * (1 - smooth01((p - 0.90) / 0.10));
+          a.pivots.left.rotation.y = open * 0.92;
+          a.pivots.right.rotation.y = -open * 0.92;
+        }
+        if (p > 0.85) setSceneCurtain(true);
+        if (p >= 1) switchSceneMode(a.targetHallwayMode);
       }
       if (stairClimbAnim) {
         const a=stairClimbAnim;
@@ -6086,7 +7113,6 @@
           const total=a.steps.reduce((sum,v)=>sum+v.seconds,0);
           const prior=a.steps.slice(0,a.stage).reduce((sum,v)=>sum+v.seconds,0);
           a.progress=(prior+a.stageTime)/total;
-          // Only mask the floor swap after ALL steps and the landing are shown.
           if(a.progress>0.970)setSceneCurtain(true);
           if(a.stageTime>=seg.seconds) {
             a.stage++;
@@ -6105,6 +7131,24 @@
       if (giftBloom) {
         giftBloom.time += dt;
         if (giftBloom.time >= 0.7) giftBloom = null;
+      }
+      if (giftBloomParticles.length > 0) {
+        for (let i = giftBloomParticles.length - 1; i >= 0; i--) {
+          const p = giftBloomParticles[i];
+          p.age += dt;
+          if (p.age >= p.life) {
+            if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
+            giftBloomParticles.splice(i, 1);
+            continue;
+          }
+          p.vy -= dt * 2.1;
+          p.mesh.position.x += p.vx * dt;
+          p.mesh.position.y = Math.max(0.05, p.mesh.position.y + p.vy * dt);
+          p.mesh.position.z += p.vz * dt;
+          p.mesh.rotation.x += p.spinX * dt;
+          p.mesh.rotation.y += p.spinY * dt;
+          p.mesh.material.opacity = Math.max(0, 1 - p.age / p.life);
+        }
       }
 
       animateRoom103Reader(dt,elapsed);
@@ -6132,41 +7176,52 @@
 
       // Accelerated, frame-rate-independent player movement and collisions.
       if (roomHero && sceneMode !== 'intro' && sceneMode !== 'campus') {
-        // First-person: W/A/S/D and arrows move relative to the viewer's yaw.
-        // Shift increases walking speed, with the same axis-separated collisions.
         const canControl = !activeTransition() && !room102SlidePointer &&
           !document.querySelector('.fixed.inset-0.z-50:not(.hidden)');
-        let ax=0,az=0;
-        if(canControl){
-          if(keysPressed.KeyW || keysPressed.ArrowUp) az+=1;
-          if(keysPressed.KeyS || keysPressed.ArrowDown) az-=1;
-          if(keysPressed.KeyA || keysPressed.ArrowLeft) ax-=1;
-          if(keysPressed.KeyD || keysPressed.ArrowRight) ax+=1;
+        let ax = 0, az = 0;
+        if (canControl) {
+          if (keysPressed.KeyW || keysPressed.ArrowUp) az += 1;
+          if (keysPressed.KeyS || keysPressed.ArrowDown) az -= 1;
+          if (keysPressed.KeyA || keysPressed.ArrowLeft) ax -= 1;
+          if (keysPressed.KeyD || keysPressed.ArrowRight) ax += 1;
         }
-        const length=Math.hypot(ax,az);
-        if(length>0){ax/=length;az/=length;}
-        const desiredX = isFirstPersonPOV ? Math.sin(fpYaw)*az + Math.cos(fpYaw)*ax : ax;
-        const desiredZ = isFirstPersonPOV ? Math.cos(fpYaw)*az - Math.sin(fpYaw)*ax : -az;
-        const running = isFirstPersonPOV && (keysPressed.ShiftLeft || keysPressed.ShiftRight);
+        const length = Math.hypot(ax, az);
+        if (length > 0) { ax /= length; az /= length; }
+        let desiredX = 0, desiredZ = 0;
+        if (isFirstPersonPOV) {
+          // Right-handed Three.js basis: forward = (sin(yaw), cos(yaw)), right = (-cos(yaw), sin(yaw))
+          desiredX = Math.sin(fpYaw) * az - Math.cos(fpYaw) * ax;
+          desiredZ = Math.cos(fpYaw) * az + Math.sin(fpYaw) * ax;
+        } else {
+          // Camera-relative horizontal movement in third-person orbit view
+          const camDir = new THREE.Vector3();
+          camera.getWorldDirection(camDir);
+          camDir.y = 0;
+          if (camDir.lengthSq() < 0.0001) camDir.set(0, 0, -1);
+          camDir.normalize();
+          const rightX = -camDir.z, rightZ = camDir.x;
+          desiredX = camDir.x * az + rightX * ax;
+          desiredZ = camDir.z * az + rightZ * ax;
+        }
+        const running = (keysPressed.ShiftLeft || keysPressed.ShiftRight);
         const topSpeed = running ? 3.70 : isFirstPersonPOV ? 2.60 : 2.65;
-        const accel = 1-Math.exp(-dt * (length ? 11 : 13));
-        heroVelocity.x=THREE.MathUtils.lerp(heroVelocity.x,desiredX*topSpeed,accel);
-        heroVelocity.z=THREE.MathUtils.lerp(heroVelocity.z,desiredZ*topSpeed,accel);
-        if(!canControl) heroVelocity.multiplyScalar(Math.exp(-dt*25));
-        const xx=roomHero.position.x+heroVelocity.x*dt;
-        const zz=roomHero.position.z+heroVelocity.z*dt;
-        // Axis separation gives natural sliding against desk edges, rather than teleporting.
-        if(avatarCanOccupy(xx,roomHero.position.z)) roomHero.position.x=xx;
-        else heroVelocity.x=0;
-        if(avatarCanOccupy(roomHero.position.x,zz)) roomHero.position.z=zz;
-        else heroVelocity.z=0;
-        const speed=heroVelocity.length();
-        if(speed>0.12 && !activeTransition()){
-          const desiredYaw = Math.atan2(heroVelocity.x,heroVelocity.z);
-          let delta=((desiredYaw-roomHero.rotation.y+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
-          roomHero.rotation.y += delta*(1-Math.exp(-dt*12));
+        const accel = 1 - Math.exp(-dt * (length ? 11 : 13));
+        heroVelocity.x = THREE.MathUtils.lerp(heroVelocity.x, desiredX * topSpeed, accel);
+        heroVelocity.z = THREE.MathUtils.lerp(heroVelocity.z, desiredZ * topSpeed, accel);
+        if (!canControl) heroVelocity.multiplyScalar(Math.exp(-dt * 25));
+        const xx = roomHero.position.x + heroVelocity.x * dt;
+        const zz = roomHero.position.z + heroVelocity.z * dt;
+        if (avatarCanOccupy(xx, roomHero.position.z)) roomHero.position.x = xx;
+        else heroVelocity.x = 0;
+        if (avatarCanOccupy(roomHero.position.x, zz)) roomHero.position.z = zz;
+        else heroVelocity.z = 0;
+        const speed = heroVelocity.length();
+        if (speed > 0.12 && !activeTransition()) {
+          const desiredYaw = Math.atan2(heroVelocity.x, heroVelocity.z);
+          let delta = ((desiredYaw - roomHero.rotation.y + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+          roomHero.rotation.y += delta * (1 - Math.exp(-dt * 12));
         }
-        if(!activeTransition()) animateHumanWalk(roomHero,elapsed,speed>0.07?8:0,dt,speed/(running?3.70:isFirstPersonPOV?2.60:2.65));
+        if (!activeTransition()) animateHumanWalk(roomHero, elapsed, speed > 0.07 ? 8 : 0, dt, speed / topSpeed);
       }
 
       ceilingFans.forEach((fan) => {
@@ -6185,41 +7240,38 @@
 
       if (roomHero && sceneMode !== 'intro' && sceneMode !== 'campus' && isFirstPersonPOV) {
         roomHero.visible = false;
-        updatePOVCamera(1-Math.exp(-dt*16));
+        updatePOVCamera(1 - Math.exp(-dt * 16));
       } else {
         if (!isFirstPersonPOV && roomHero && sceneMode !== 'campus' && sceneMode !== 'intro') {
           roomHero.visible = true;
           const activeGift = room101GiftAnim || room301GiftAnim;
           if (stairClimbAnim) {
             const currentY = roomHero.position.y;
-            const viewY = stairClimbAnim.goingUp ? Math.max(2.7,currentY+1.75)
-              : Math.max(-2.4,currentY+2.4);
-            camera.position.lerp(new THREE.Vector3(stairClimbAnim.shaftX+4.0,viewY,3.0),1-Math.exp(-dt*3.1));
-            controls.target.lerp(new THREE.Vector3(stairClimbAnim.shaftX,currentY+1.12,-0.95),1-Math.exp(-dt*3.1));
+            const viewY = stairClimbAnim.goingUp ? Math.max(2.7, currentY + 1.75)
+              : Math.max(-2.4, currentY + 2.4);
+            camera.position.lerp(new THREE.Vector3(stairClimbAnim.shaftX + 4.0, viewY, 3.0), 1 - Math.exp(-dt * 3.1));
+            controls.target.lerp(new THREE.Vector3(stairClimbAnim.shaftX, currentY + 1.12, -0.95), 1 - Math.exp(-dt * 3.1));
           }
           if (activeGift) {
-            // A composed third-person shot: both faces and the bouquet remain visible.
-            const b=activeGift.whichRoom==='room101';
-            const desirePos=new THREE.Vector3(b?2.85:-2.6,2.6,b?0.65:0.3);
-            const desireTarget=new THREE.Vector3(0,1.32,b?-3.3:-3.5);
-            camera.position.lerp(desirePos,1-Math.exp(-dt*2.4));
-            controls.target.lerp(desireTarget,1-Math.exp(-dt*2.4));
+            const b = activeGift.whichRoom === 'room101';
+            const desirePos = new THREE.Vector3(b ? 2.85 : -2.6, 2.6, b ? 0.65 : 0.3);
+            const desireTarget = new THREE.Vector3(0, 1.32, b ? -3.3 : -3.5);
+            camera.position.lerp(desirePos, 1 - Math.exp(-dt * 2.4));
+            controls.target.lerp(desireTarget, 1 - Math.exp(-dt * 2.4));
           }
-          // Keep camera inside actual geometry; the original +/- 9 m camera bounds
-          // allowed the orbit to pass through walls and lose visibility.
-          const hall=sceneMode.startsWith('hallway');
-          const limX=hall?12.55:({room201:7.5,room301:7.05,room302:7.3}[sceneMode]||6.35);
-          const limZ=hall?3.3:({room201:6.25,room301:6.0,room302:5.9}[sceneMode]||5.38);
-          camera.position.x=THREE.MathUtils.clamp(camera.position.x,-limX,limX);
-          camera.position.z=THREE.MathUtils.clamp(camera.position.z,-limZ,limZ);
-          camera.position.y=stairClimbAnim
-            ? THREE.MathUtils.clamp(camera.position.y,-2.5,6.6)
-            : THREE.MathUtils.clamp(camera.position.y,1.65,hall?3.55:3.4);
+          const hall = sceneMode.startsWith('hallway');
+          const limX = hall ? 12.55 : Math.max(4.5, activeRoomSpec.width / 2 - 0.60);
+          const limZ = hall ? 3.35 : Math.max(4.2, activeRoomSpec.depth / 2 - 0.60);
+          camera.position.x = THREE.MathUtils.clamp(camera.position.x, -limX, limX);
+          camera.position.z = THREE.MathUtils.clamp(camera.position.z, -limZ, limZ);
+          camera.position.y = stairClimbAnim
+            ? THREE.MathUtils.clamp(camera.position.y, -2.5, 6.6)
+            : THREE.MathUtils.clamp(camera.position.y, 1.55, hall ? 3.55 : Math.max(3.35, activeRoomSpec.height - 0.45));
         } else if (SCENE_CAMERA_BOUNDS[sceneMode]) {
-          const b=SCENE_CAMERA_BOUNDS[sceneMode];
-          camera.position.x=THREE.MathUtils.clamp(camera.position.x,b.minX,b.maxX);
-          camera.position.y=THREE.MathUtils.clamp(camera.position.y,b.minY,b.maxY);
-          camera.position.z=THREE.MathUtils.clamp(camera.position.z,b.minZ,b.maxZ);
+          const b = SCENE_CAMERA_BOUNDS[sceneMode];
+          camera.position.x = THREE.MathUtils.clamp(camera.position.x, b.minX, b.maxX);
+          camera.position.y = THREE.MathUtils.clamp(camera.position.y, b.minY, b.maxY);
+          camera.position.z = THREE.MathUtils.clamp(camera.position.z, b.minZ, b.maxZ);
         }
         controls.update();
       }
@@ -6276,61 +7328,135 @@
         e.stopImmediatePropagation();
       }, {capture:true});
 
-      // 360-degree look-around when First-Person POV is active
+      // Track pointerdown coordinates so camera orbit drags never misfire as 3D clicks
+      let pointerDownX = 0, pointerDownY = 0, pointerMovedDist = 0;
       renderer.domElement.addEventListener('pointerdown', (e) => {
         isPointerDragging = true;
+        pointerDownX = e.clientX;
+        pointerDownY = e.clientY;
+        pointerMovedDist = 0;
         lastPointerX = e.clientX;
         lastPointerY = e.clientY;
         if (isFirstPersonPOV) renderer.domElement.setPointerCapture?.(e.pointerId);
       });
+
+      const INTERACTION_LABELS = {
+        enter_teacher_bldg: '💙 Vào Tòa Xanh • Tri Ân Thầy Cô',
+        enter_female_bldg: '💗 Vào Tòa Hồng • Sự Kiện 20/11',
+        exit_to_campus: '🌳 Ra Sân Trường',
+        enter_101: '🚪 Vào Phòng 101',
+        enter_102: '🚪 Vào Phòng 102',
+        enter_103: '🚪 Vào Phòng 103',
+        enter_201: '🚪 Vào Phòng 201',
+        enter_202: '🚪 Vào Phòng 202',
+        enter_301: '🚪 Vào Phòng 301',
+        enter_302: '🚪 Vào Phòng 302',
+        exit_to_hallway1: '🚪 Ra Hành Lang Tầng 1',
+        exit_to_hallway2: '🚪 Ra Hành Lang Tầng 2',
+        exit_to_hallway3: '🚪 Ra Hành Lang Tầng 3',
+        stairs_up_2: '🪜 Lên Tầng 2',
+        stairs_up_3: '🪜 Lên Tầng 3',
+        stairs_down_2: '⬇️ Xuống Tầng 2',
+        stairs_down_1: '⬇️ Xuống Tầng 1',
+        gift_teacher_101: '💐 Tặng hoa tri ân Thầy/Cô',
+        gift_teacher_301: '💐 Tặng hoa tri ân Thầy/Cô',
+        talk_decor_student: '💬 Trò chuyện cùng nhóm trang trí',
+        chalkboard_wish: '✍️ Viết lời chúc lên Bảng Xanh',
+        room102_slide_touch: '📽️ Vuốt hoặc chạm để đổi Slide',
+        open_wall_newspaper: '📰 Đọc Báo Tường 20/11',
+        view_artwork: '🖼️ Xem chi tiết Tranh Triển Lãm',
+        open_anthology: '📚 Mở đọc Tập San Tri Ân 20/11',
+        zoom_photo_301: '🔍 Phóng to Ảnh Kỷ Niệm',
+        open_tribute_tree: '💌 Viết & Treo Thiệp lên Cây Tri Ân',
+        greet_boardroom_teacher: '🤝 Kính chào Thầy/Cô Hội Đồng',
+        inspect_honor_plaque: '🏅 Xem Bảng Vàng Danh Dự',
+        open_pink301_modal: '📌 Tải ảnh / Treo lời chúc lên khung',
+        open_pink302_modal: '🎁 Đặt hoa, quà & Nhận Chứng Nhận'
+      };
+      const hoverRaycaster = new THREE.Raycaster();
+      const hoverPointer = new THREE.Vector2();
+      const hoverTooltip = document.getElementById('hover-tooltip');
+      const canvasContainer = document.getElementById('canvas-container');
+      let lastHoverCheck = 0;
+
       window.addEventListener('pointermove', (e) => {
-        if(room102SlidePointer){
-          if(e.pointerId!==room102SlidePointer.id) return;
-          const dx=e.clientX-room102SlidePointer.x;
-          room102SlidePointer.deltaX=dx;
-          const width=Math.max(170,Math.min(450,renderer.domElement.clientWidth*0.42));
-          room102SlidePointer.offset=THREE.MathUtils.clamp(dx/width,-0.94,0.94);
+        if (room102SlidePointer) {
+          if (e.pointerId !== room102SlidePointer.id) return;
+          const dx = e.clientX - room102SlidePointer.x;
+          room102SlidePointer.deltaX = dx;
+          const width = Math.max(170, Math.min(450, renderer.domElement.clientWidth * 0.42));
+          room102SlidePointer.offset = THREE.MathUtils.clamp(dx / width, -0.94, 0.94);
           paintRoom102Slide(room102SlidePointer.offset);
           e.preventDefault();
           return;
         }
-        if (!isPointerDragging) return;
-        const dx = e.clientX - lastPointerX;
-        const dy = e.clientY - lastPointerY;
-        lastPointerX = e.clientX;
-        lastPointerY = e.clientY;
-        if (isFirstPersonPOV && sceneMode !== 'intro' && sceneMode !== 'campus') {
-          fpYaw -= dx * 0.0045;
-          fpPitch = THREE.MathUtils.clamp(fpPitch - dy * 0.0035, -0.75, 0.75);
+        if (isPointerDragging) {
+          const dx = e.clientX - lastPointerX;
+          const dy = e.clientY - lastPointerY;
+          pointerMovedDist = Math.max(pointerMovedDist, Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY));
+          lastPointerX = e.clientX;
+          lastPointerY = e.clientY;
+          if (isFirstPersonPOV && sceneMode !== 'intro' && sceneMode !== 'campus') {
+            fpYaw -= dx * 0.0045;
+            fpPitch = THREE.MathUtils.clamp(fpPitch - dy * 0.0035, -0.75, 0.75);
+          }
+          if (hoverTooltip) hoverTooltip.classList.add('hidden');
+          return;
+        }
+        // Lightweight throttled 3D hover tooltip & cursor feedback
+        const now = performance.now();
+        if (now - lastHoverCheck < 45 || sceneMode === 'intro' || activeTransition() ||
+            document.querySelector('.app-modal:not(.hidden)') || e.target !== renderer.domElement) {
+          if (e.target !== renderer.domElement && hoverTooltip) hoverTooltip.classList.add('hidden');
+          return;
+        }
+        lastHoverCheck = now;
+        const rect = renderer.domElement.getBoundingClientRect();
+        hoverPointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        hoverPointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        hoverRaycaster.setFromCamera(hoverPointer, camera);
+        const hits = hoverRaycaster.intersectObjects(interactiveList, false);
+        const type = hits[0]?.object?.userData?.interactiveType;
+        if (type && INTERACTION_LABELS[type]) {
+          canvasContainer?.classList.add('interactive-hover');
+          if (hoverTooltip) {
+            hoverTooltip.textContent = INTERACTION_LABELS[type];
+            hoverTooltip.style.left = `${e.clientX}px`;
+            hoverTooltip.style.top = `${e.clientY}px`;
+            hoverTooltip.classList.remove('hidden');
+          }
+        } else {
+          canvasContainer?.classList.remove('interactive-hover');
+          if (hoverTooltip) hoverTooltip.classList.add('hidden');
         }
       });
       window.addEventListener('pointerup', (e) => {
-        const gesture=room102SlidePointer;
-        if(gesture && e.pointerId===gesture.id){
-          room102SlidePointer=null;
-          if(!isFirstPersonPOV) controls.enabled=gesture.originalOrbitEnabled;
-          const dx=gesture.deltaX||0;
-          const offset=gesture.offset||0;
-          if(Math.abs(offset)>0.19 || Math.abs(dx)>48){
-            changeRoom102Slide(dx<0?1:-1,offset);
-          } else if(Math.abs(dx)>13){
-            changeRoom102Slide(0,offset);
+        const gesture = room102SlidePointer;
+        if (gesture && e.pointerId === gesture.id) {
+          room102SlidePointer = null;
+          if (!isFirstPersonPOV) controls.enabled = gesture.originalOrbitEnabled;
+          const dx = gesture.deltaX || 0;
+          const offset = gesture.offset || 0;
+          if (Math.abs(offset) > 0.19 || Math.abs(dx) > 48) {
+            changeRoom102Slide(dx < 0 ? 1 : -1, offset);
+          } else if (Math.abs(dx) > 13) {
+            changeRoom102Slide(0, offset);
           } else {
-            changeRoom102Slide(gesture.uv<0.33?-1:1,offset);
+            changeRoom102Slide(gesture.uv < 0.33 ? -1 : 1, offset);
           }
-          slideIgnoreClickUntil=performance.now()+500;
+          slideIgnoreClickUntil = performance.now() + 500;
           e.preventDefault();
         }
-        isPointerDragging=false;
+        isPointerDragging = false;
       });
       window.addEventListener('pointercancel', (e) => {
-        if(room102SlidePointer && room102SlidePointer.id===e.pointerId) {
-          const offset=room102SlidePointer.offset||0;
-          if(!isFirstPersonPOV) controls.enabled=room102SlidePointer.originalOrbitEnabled;
-          room102SlidePointer=null;
-          changeRoom102Slide(0,offset);
+        if (room102SlidePointer && room102SlidePointer.id === e.pointerId) {
+          const offset = room102SlidePointer.offset || 0;
+          if (!isFirstPersonPOV) controls.enabled = room102SlidePointer.originalOrbitEnabled;
+          room102SlidePointer = null;
+          changeRoom102Slide(0, offset);
         }
-        isPointerDragging=false;
+        isPointerDragging = false;
       });
 
       const backBtn = document.getElementById('btn-back');
@@ -6350,43 +7476,49 @@
       }
 
       function chooseCamera(pov) {
-        if(sceneMode==='campus'||sceneMode==='intro') {
-          if(pov) showSpeechCard('Góc máy người tặng','Hãy vào một phòng học để sử dụng camera đặt tại vị trí học sinh.');
+        if (sceneMode === 'campus' || sceneMode === 'intro') {
+          if (pov) showSpeechCard('Góc máy người tặng', 'Hãy vào một phòng học để sử dụng camera đặt tại vị trí học sinh.');
           return;
         }
-        if(isFirstPersonPOV===pov) return;
-        if(!isFirstPersonPOV && controls) {
+        if (isFirstPersonPOV === pov) return;
+        if (!isFirstPersonPOV && controls) {
           cameraState.overview.position.copy(camera.position);
           cameraState.overview.target.copy(controls.target);
-          cameraState.overviewScene=sceneMode;
+          cameraState.overviewScene = sceneMode;
         }
-        isFirstPersonPOV=pov;
-        if(pov) {
-          fpYaw=roomHero?.rotation.y ?? Math.PI;
-          fpPitch=-0.04;
-          renderer.domElement.tabIndex=0;
-          renderer.domElement.focus?.({preventScroll:true});
+        isFirstPersonPOV = pov;
+        if (pov) {
+          fpYaw = roomHero?.rotation.y ?? Math.PI;
+          fpPitch = -0.04;
+          renderer.domElement.tabIndex = 0;
+          renderer.domElement.focus?.({ preventScroll: true });
         }
         applyInteriorCameraView(true);
-        playChime(pov?540:660,0.13);
+        playChime(pov ? 540 : 660, 0.13);
       }
-      const btnOverview=document.getElementById('btn-camera-overview');
-      const btnDonor=document.getElementById('btn-camera-donor');
-      if(btnOverview) btnOverview.addEventListener('click',()=>chooseCamera(false));
-      if(btnDonor) {
-        btnDonor.title='Góc người tặng hoa: W/A/S/D hoặc phím mũi tên để di chuyển; giữ Shift để chạy; kéo chuột để nhìn.';
-        btnDonor.addEventListener('click',()=>chooseCamera(true));
+      const btnOverview = document.getElementById('btn-camera-overview');
+      const btnDonor = document.getElementById('btn-camera-donor');
+      if (btnOverview) btnOverview.addEventListener('click', () => chooseCamera(false));
+      if (btnDonor) {
+        btnDonor.title = 'Góc người tặng hoa: W/A/S/D hoặc phím mũi tên để di chuyển; giữ Shift để chạy; kéo chuột để nhìn.';
+        btnDonor.addEventListener('click', () => chooseCamera(true));
       }
-      const audioBtn=document.getElementById('btn-audio-toggle');
-      if(audioBtn) audioBtn.addEventListener('click',()=>{
-        audioEnabled=!audioEnabled;
-        audioBtn.textContent=audioEnabled?'🔊 Âm thanh':'🔇 Tắt tiếng';
-        audioBtn.setAttribute('aria-pressed',String(audioEnabled));
-        if(!audioEnabled && 'speechSynthesis' in window) window.speechSynthesis.cancel();
-        if(audioEnabled) playChime(720,0.12);
+      const audioBtn = document.getElementById('btn-audio-toggle');
+      if (audioBtn) audioBtn.addEventListener('click', () => {
+        audioEnabled = !audioEnabled;
+        audioBtn.textContent = audioEnabled ? '🔊 Âm thanh' : '🔇 Tắt tiếng';
+        audioBtn.setAttribute('aria-pressed', String(audioEnabled));
+        if (!audioEnabled && 'speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          speechPlaying = false;
+        }
+        if (audioEnabled) playChime(720, 0.12);
       });
-      const replayVoice=document.getElementById('btn-replay-voice');
-      if(replayVoice) replayVoice.addEventListener('click',()=>speakVietnamese(lastSpeechText || document.getElementById('speech-text')?.textContent || ''));
+      const replayVoice = document.getElementById('btn-replay-voice');
+      if (replayVoice) replayVoice.addEventListener('click', () => {
+        if (!audioEnabled && audioBtn) audioBtn.click();
+        speakVietnamese(lastSpeechText || document.getElementById('speech-text')?.textContent || '');
+      });
 
       const gfxBtn = document.getElementById('btn-toggle-gfx');
       if (gfxBtn) {
@@ -6400,6 +7532,33 @@
         });
       }
 
+      // Close any open modal on Escape or backdrop click
+      document.querySelectorAll('.app-modal').forEach((modalEl) => {
+        modalEl.addEventListener('click', (e) => {
+          if (e.target === modalEl) {
+            modalEl.classList.add('hidden');
+            if (modalEl.id === 'anthology-modal') {
+              anthologySwipeStart = null;
+              resetAnthologyTurnState();
+            }
+          }
+        });
+      });
+      window.addEventListener('keydown', (e) => {
+        if (e.code !== 'Escape') return;
+        const openModals = document.querySelectorAll('.app-modal:not(.hidden)');
+        if (openModals.length > 0) {
+          e.preventDefault();
+          openModals.forEach(m => {
+            m.classList.add('hidden');
+            if (m.id === 'anthology-modal') {
+              anthologySwipeStart = null;
+              resetAnthologyTurnState();
+            }
+          });
+        }
+      });
+
       const closeSpeech = document.getElementById('btn-close-speech');
       if (closeSpeech) closeSpeech.addEventListener('click', hideSpeechCard);
 
@@ -6410,13 +7569,22 @@
       const saveChalk = document.getElementById('btn-save-chalk');
       if (saveChalk) {
         saveChalk.addEventListener('click', () => {
-          const val = (document.getElementById('chalk-wish-input').value || '').trim();
-          if (val) {
-            room101SavedWishes.push(val);
-            updateRoom101ChalkboardWish(val);
-            showSpeechCard('Lời Chúc Đã Khắc Lên Bảng 3D', `“${val}”`);
-            playChime(700, 0.18);
+          const inp = document.getElementById('chalk-wish-input');
+          const err = document.getElementById('chalk-error-msg');
+          const val = (inp?.value || '').trim();
+          if (!val) {
+            if (err) err.classList.remove('hidden');
+            inp?.focus();
+            return;
           }
+          if (err) err.classList.add('hidden');
+          room101SavedWishes.push(val);
+          if (!room101SavedWishesByBuilding[currentBuildingSide]) room101SavedWishesByBuilding[currentBuildingSide] = [];
+          room101SavedWishesByBuilding[currentBuildingSide].push(val);
+          updateRoom101ChalkboardWish(val);
+          showSpeechCard('Lời Chúc Đã Khắc Lên Bảng 3D', `“${val}”`);
+          playChime(700, 0.18);
+          if (inp) inp.value = '';
           document.getElementById('chalkboard-modal').classList.add('hidden');
         });
       }
@@ -6430,11 +7598,14 @@
         const el = document.getElementById(id);
         if (el) el.addEventListener('click', () => document.getElementById('artwork-modal').classList.add('hidden'));
       });
+      document.getElementById('btn-prev-art')?.addEventListener('click', () => openArtworkViewer(currentArtworkIdx - 1));
+      document.getElementById('btn-next-art')?.addEventListener('click', () => openArtworkViewer(currentArtworkIdx + 1));
 
       const closeAnth = document.getElementById('btn-close-anthology');
       if (closeAnth) closeAnth.addEventListener('click', () => {
         document.getElementById('anthology-modal').classList.add('hidden');
-        anthologySwipeStart=null;
+        anthologySwipeStart = null;
+        resetAnthologyTurnState();
       });
       document.querySelectorAll('.anthology-tab').forEach((tab) => {
         tab.addEventListener('click', () => openAnthologyModal(Number(tab.getAttribute('data-book') || 0), 0));
@@ -6443,36 +7614,36 @@
       if (prevAnth) prevAnth.addEventListener('click', () => openAnthologyModal(currentAnthologyBookIdx, currentAnthologyPageIdx - 1));
       const nextAnth = document.getElementById('btn-next-anthology');
       if (nextAnth) nextAnth.addEventListener('click', () => openAnthologyModal(currentAnthologyBookIdx, currentAnthologyPageIdx + 1));
-      const anthologyShell=document.getElementById('anthology-book-shell');
-      if(anthologyShell) {
-        anthologyShell.addEventListener('pointerdown',e=>{
-          anthologySwipeStart={id:e.pointerId,x:e.clientX,y:e.clientY};
+      const anthologyShell = document.getElementById('anthology-book-shell');
+      if (anthologyShell) {
+        anthologyShell.addEventListener('pointerdown', e => {
+          anthologySwipeStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
         });
-        anthologyShell.addEventListener('pointerup',e=>{
-          if(!anthologySwipeStart || e.pointerId!==anthologySwipeStart.id)return;
-          const dx=e.clientX-anthologySwipeStart.x;
-          const dy=e.clientY-anthologySwipeStart.y;
-          anthologySwipeStart=null;
-          if(Math.abs(dx)>55 && Math.abs(dx)>Math.abs(dy)*1.2)
-            openAnthologyModal(currentAnthologyBookIdx,currentAnthologyPageIdx+(dx<0?1:-1));
+        anthologyShell.addEventListener('pointerup', e => {
+          if (!anthologySwipeStart || e.pointerId !== anthologySwipeStart.id) return;
+          const dx = e.clientX - anthologySwipeStart.x;
+          const dy = e.clientY - anthologySwipeStart.y;
+          anthologySwipeStart = null;
+          if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.2)
+            openAnthologyModal(currentAnthologyBookIdx, currentAnthologyPageIdx + (dx < 0 ? 1 : -1));
         });
-        anthologyShell.addEventListener('pointercancel',()=>{anthologySwipeStart=null;});
+        anthologyShell.addEventListener('pointercancel', () => { anthologySwipeStart = null; });
       }
-      window.addEventListener('keydown',e=>{
-        const modal=document.getElementById('anthology-modal');
-        if(!modal||modal.classList.contains('hidden'))return;
-        if(e.code==='ArrowRight'||e.code==='ArrowLeft'){
-          e.preventDefault();e.stopPropagation();
-          openAnthologyModal(currentAnthologyBookIdx,currentAnthologyPageIdx+(e.code==='ArrowRight'?1:-1));
-        }else if(e.code==='Escape'){
-          e.preventDefault();modal.classList.add('hidden');
+      window.addEventListener('keydown', e => {
+        const modal = document.getElementById('anthology-modal');
+        if (!modal || modal.classList.contains('hidden')) return;
+        if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+          e.preventDefault(); e.stopPropagation();
+          openAnthologyModal(currentAnthologyBookIdx, currentAnthologyPageIdx + (e.code === 'ArrowRight' ? 1 : -1));
         }
-      },true);
+      }, true);
 
       ['btn-close-photo-zoom', 'btn-ok-photo-zoom'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('click', () => document.getElementById('photo-zoom-modal').classList.add('hidden'));
       });
+      document.getElementById('btn-prev-photo301')?.addEventListener('click', () => openPhotoZoomModal(currentPhotoIdx301 - 1));
+      document.getElementById('btn-next-photo301')?.addEventListener('click', () => openPhotoZoomModal(currentPhotoIdx301 + 1));
       const zoomIn = document.getElementById('btn-zoom-in');
       if (zoomIn) {
         zoomIn.addEventListener('click', () => {
@@ -6500,6 +7671,7 @@
       const voicePhoto = document.getElementById('btn-voice-photo');
       if (voicePhoto) {
         voicePhoto.addEventListener('click', () => {
+          if (!audioEnabled && audioBtn) audioBtn.click();
           const item = ROOM301_PHOTOS[currentPhotoIdx301];
           if (item) speakVietnamese(`${item.title}. ${item.desc}`);
         });
@@ -6508,17 +7680,24 @@
       const closeTreeModal = document.getElementById('btn-close-tribute-modal');
       if (closeTreeModal) closeTreeModal.addEventListener('click', () => document.getElementById('tribute-tree-modal').classList.add('hidden'));
       const selLeft = document.getElementById('btn-select-tree-left');
-      if (selLeft) selLeft.addEventListener('click', () => { selectedTributeTreeSide = 'left'; });
+      if (selLeft) selLeft.addEventListener('click', () => { selectedTributeTreeSide = 'left'; syncTributeTreeChoiceUI(); });
       const selRight = document.getElementById('btn-select-tree-right');
-      if (selRight) selRight.addEventListener('click', () => { selectedTributeTreeSide = 'right'; });
+      if (selRight) selRight.addEventListener('click', () => { selectedTributeTreeSide = 'right'; syncTributeTreeChoiceUI(); });
 
       const submitCardBtn = document.getElementById('btn-submit-tribute-card');
       if (submitCardBtn) {
         submitCardBtn.addEventListener('click', async () => {
           const teacherName = (document.getElementById('tribute-teacher-input').value || '').trim() || 'Quý Thầy Cô';
-          const message = (document.getElementById('tribute-message-input').value || '').trim();
+          const msgInp = document.getElementById('tribute-message-input');
+          const errEl = document.getElementById('tribute-error-msg');
+          const message = (msgInp?.value || '').trim();
           const senderName = (document.getElementById('tribute-sender-input').value || '').trim() || 'Học trò';
-          if (!message) return;
+          if (!message) {
+            if (errEl) errEl.classList.remove('hidden');
+            msgInp?.focus();
+            return;
+          }
+          if (errEl) errEl.classList.add('hidden');
           if (window.TributeCloud) {
             const res = await window.TributeCloud.addTributeCard({
               treeSide: selectedTributeTreeSide,
@@ -6530,7 +7709,7 @@
               openPayment5kModal();
               return;
             }
-            document.getElementById('tribute-message-input').value = '';
+            if (msgInp) msgInp.value = '';
             playChime(760, 0.2);
           }
         });
@@ -6541,14 +7720,23 @@
 
       const copyLinkBtn = document.getElementById('btn-copy-share-link');
       if (copyLinkBtn) {
-        copyLinkBtn.addEventListener('click', () => {
-          const tmp = document.createElement('input');
-          tmp.value = window.location.href;
-          document.body.appendChild(tmp);
-          tmp.select();
-          document.execCommand('copy');
-          document.body.removeChild(tmp);
-          showSpeechCard('Đã Sao Chép Liên Kết', 'Link lưu chung thiệp tri ân đã được sao chép vào bộ nhớ tạm!');
+        copyLinkBtn.addEventListener('click', async () => {
+          const url = window.location.href;
+          try {
+            if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(url);
+            } else {
+              const tmp = document.createElement('input');
+              tmp.value = url;
+              document.body.appendChild(tmp);
+              tmp.select();
+              document.execCommand('copy');
+              document.body.removeChild(tmp);
+            }
+            showSpeechCard('Đã Sao Chép Liên Kết', 'Link lưu chung thiệp tri ân đã được sao chép vào bộ nhớ tạm!');
+          } catch {
+            showSpeechCard('Liên Kết Chia Sẻ', `Hãy sao chép đường dẫn: ${url}`);
+          }
         });
       }
 
@@ -6559,8 +7747,8 @@
       const confirmPay5k = document.getElementById('btn-confirm-pay5k');
       if (confirmPay5k) {
         confirmPay5k.disabled = true;
-        confirmPay5k.title='Chưa có máy chủ xác nhận giao dịch — không thể tự cộng lượt.';
-        confirmPay5k.textContent='Chưa hỗ trợ thanh toán';
+        confirmPay5k.title = 'Chưa có máy chủ xác nhận giao dịch — không thể tự cộng lượt.';
+        confirmPay5k.textContent = 'Chưa hỗ trợ thanh toán';
       }
 
       ['btn-close-pink301', 'btn-cancel-pink301'].forEach((id) => {
@@ -6572,13 +7760,13 @@
       if (tabPhoto && tabWish) {
         tabPhoto.addEventListener('click', () => {
           pink301ActiveTab = 'photo';
-          document.getElementById('p301-photo-panel').classList.remove('hidden');
-          document.getElementById('p301-wish-panel').classList.add('hidden');
+          syncPink301TabUI();
+          document.getElementById('p301-error-msg')?.classList.add('hidden');
         });
         tabWish.addEventListener('click', () => {
           pink301ActiveTab = 'wish';
-          document.getElementById('p301-wish-panel').classList.remove('hidden');
-          document.getElementById('p301-photo-panel').classList.add('hidden');
+          syncPink301TabUI();
+          document.getElementById('p301-error-msg')?.classList.add('hidden');
         });
       }
       const fileInp = document.getElementById('p301-file-input');
@@ -6587,6 +7775,7 @@
           const f = e.target.files && e.target.files[0];
           if (!f) return;
           document.getElementById('p301-file-name').textContent = f.name;
+          document.getElementById('p301-error-msg')?.classList.add('hidden');
           const reader = new FileReader();
           reader.onload = () => {
             pink301PendingDataURL = reader.result;
@@ -6597,39 +7786,76 @@
       const hangBtn = document.getElementById('btn-hang-pink301');
       if (hangBtn) {
         hangBtn.addEventListener('click', () => {
-          if (pink301HangCount >= 1) {
-            openPayment5kModal();
-            return; // Do not hang an unpaid image and continue anyway.
-          }
-          const slotIdx = pink301Frames.selectedSlot || 0;
+          const errEl = document.getElementById('p301-error-msg');
+          const slotIdx = pink301SelectedSlot || 0;
           const targetMesh = pink301Frames[slotIdx] || pink301Frames[0];
-          if (targetMesh) {
-            if (pink301ActiveTab === 'photo' && pink301PendingDataURL) {
-              const tex = new THREE.TextureLoader().load(pink301PendingDataURL);
-              tex.encoding = THREE.sRGBEncoding;
-              targetMesh.material.map = tex;
-              targetMesh.material.needsUpdate = true;
-            } else {
-              const wishText = document.getElementById('p301-wish-select').value;
-              const author = document.getElementById('p301-wish-author').value || 'Học trò 20/11';
-              const tex = makeCanvasTexture(`wish_301_${Date.now()}`, 512, 360, (ctx, w, h) => {
-                ctx.fillStyle = '#831843';
-                ctx.fillRect(0, 0, w, h);
-                ctx.strokeStyle = '#facc15';
-                ctx.lineWidth = 10;
-                ctx.strokeRect(12, 12, w - 24, h - 24);
+          if (!targetMesh) return;
+
+          if (pink301ActiveTab === 'photo') {
+            if (!pink301PendingDataURL) {
+              if (errEl) {
+                errEl.textContent = 'Vui lòng chọn một tệp ảnh từ thiết bị trước khi treo lên khung!';
+                errEl.classList.remove('hidden');
+              }
+              return;
+            }
+            const caption = (document.getElementById('p301-photo-caption')?.value || '').trim();
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = 768; canvas.height = 540;
+              const ctx = canvas.getContext('2d');
+              ctx.fillStyle = '#0f172a';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              const targetH = caption ? 468 : 540;
+              const scale = Math.max(canvas.width / img.width, targetH / img.height);
+              const dw = img.width * scale, dh = img.height * scale;
+              ctx.save();
+              ctx.beginPath(); ctx.rect(0, 0, canvas.width, targetH); ctx.clip();
+              ctx.drawImage(img, (canvas.width - dw) / 2, (targetH - dh) / 2, dw, dh);
+              ctx.restore();
+              if (caption) {
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
+                ctx.fillRect(0, 468, canvas.width, 72);
                 ctx.fillStyle = '#fef08a';
                 ctx.font = '700 22px Inter, sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(wishText.slice(0, 42), w / 2, 150);
-                ctx.fillText(wishText.slice(42, 84), w / 2, 190);
-                ctx.fillStyle = '#fbcfe8';
-                ctx.font = '600 18px Inter, sans-serif';
-                ctx.fillText(`— ${author}`, w / 2, 270);
-              });
+                ctx.fillText(caption, canvas.width / 2, 512, canvas.width - 48);
+              }
+              const tex = new THREE.CanvasTexture(canvas);
+              tex.encoding = THREE.sRGBEncoding;
+              if (pink301SavedSlots[slotIdx]) pink301SavedSlots[slotIdx].dispose?.();
+              pink301SavedSlots[slotIdx] = tex;
               targetMesh.material.map = tex;
               targetMesh.material.needsUpdate = true;
-            }
+            };
+            img.src = pink301PendingDataURL;
+          } else {
+            const wishText = document.getElementById('p301-wish-select').value;
+            const author = (document.getElementById('p301-wish-author').value || '').trim() || 'Học trò 20/11';
+            const canvas = document.createElement('canvas');
+            canvas.width = 768; canvas.height = 540;
+            const ctx = canvas.getContext('2d');
+            const g = ctx.createLinearGradient(0, 0, 768, 540);
+            g.addColorStop(0, '#831843'); g.addColorStop(1, '#500724');
+            ctx.fillStyle = g; ctx.fillRect(0, 0, 768, 540);
+            ctx.strokeStyle = '#facc15'; ctx.lineWidth = 12;
+            ctx.strokeRect(18, 18, 732, 504);
+            ctx.fillStyle = '#fef08a';
+            ctx.font = '700 30px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            const lines = slideWrapLines(ctx, wishText, 640, 4);
+            const startY = 210 - (lines.length - 1) * 18;
+            lines.forEach((ln, idx) => ctx.fillText(ln, 384, startY + idx * 48));
+            ctx.fillStyle = '#fbcfe8';
+            ctx.font = '600 24px Inter, sans-serif';
+            ctx.fillText(`— ${author} —`, 384, 435);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.encoding = THREE.sRGBEncoding;
+            if (pink301SavedSlots[slotIdx]) pink301SavedSlots[slotIdx].dispose?.();
+            pink301SavedSlots[slotIdx] = tex;
+            targetMesh.material.map = tex;
+            targetMesh.material.needsUpdate = true;
           }
           pink301HangCount += 1;
           document.getElementById('pink-301-modal').classList.add('hidden');
@@ -6644,7 +7870,11 @@
       document.querySelectorAll('.p302-item-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           pink302SelectedItem = btn.getAttribute('data-item') || 'flower';
-          document.querySelectorAll('.p302-item-btn').forEach((b) => b.classList.remove('border-2', 'border-pink-400', 'bg-pink-500/25'));
+          document.querySelectorAll('.p302-item-btn').forEach((b) => {
+            b.classList.remove('border-2', 'border-pink-400', 'bg-pink-500/25');
+            b.classList.add('border', 'border-white/15', 'bg-white/5');
+          });
+          btn.classList.remove('border', 'border-white/15', 'bg-white/5');
           btn.classList.add('border-2', 'border-pink-400', 'bg-pink-500/25');
         });
       });
@@ -6656,37 +7886,10 @@
           const note = (document.getElementById('p302-note-input').value || '').trim();
           const itemLabels = { flower: 'Đóa Hoa Tươi Thắm', gift: 'Gói Quà Tri Ân', letter: 'Bức Thư Tay 20/11' };
 
-          if (pink302TableGroup) {
-            // Allocate slots across the table in two rows; do not stack objects atop each other.
-            const itemIndex=pink302PlacedCount % 10;
-            const ox=-2.06+(itemIndex % 5)*1.03;
-            const oz=(Math.floor(itemIndex/5)===0?-0.55:0.55);
-            pink302PlacedCount += 1;
-            let obj3d;
-            if (pink302SelectedItem === 'flower') {
-              obj3d = createFlowerBouquet();
-              obj3d.scale.set(1.4, 1.4, 1.4);
-            } else if (pink302SelectedItem === 'gift') {
-              obj3d = new THREE.Mesh(
-                new THREE.BoxGeometry(0.45, 0.36, 0.45),
-                new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.35 })
-              );
-              obj3d.position.y = 0.18;
-            } else {
-              obj3d = new THREE.Mesh(
-                new THREE.BoxGeometry(0.48, 0.04, 0.32),
-                new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.4 })
-              );
-              obj3d.position.y = 0.02;
-            }
-            obj3d.position.x = ox;
-            obj3d.position.z = oz;
-            if(pink302PlacedCount > 10 && pink302TableGroup.children.length >= 10){
-              const previous=pink302TableGroup.children[itemIndex];
-              if(previous) pink302TableGroup.remove(previous);
-            }
-            pink302TableGroup.add(obj3d);
-          }
+          const slotIndex = pink302PlacedCount % 10;
+          pink302PlacedItems[slotIndex] = pink302SelectedItem;
+          pink302PlacedCount += 1;
+          renderPink302TableItems();
 
           document.getElementById('pink-302-modal').classList.add('hidden');
           renderGratitudeCertificate({
@@ -6710,7 +7913,8 @@
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
       renderer.domElement.addEventListener('click', (e) => {
-        if (performance.now()<slideIgnoreClickUntil) return;
+        if (performance.now() < slideIgnoreClickUntil) return;
+        if (pointerMovedDist > 6) return; // Ignore orbit-camera drags
         if (sceneMode === 'intro' || activeTransition()) return;
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -6731,9 +7935,9 @@
         else if (type === 'enter_202') startEnterClassroomWalk('room202', 6.8);
         else if (type === 'enter_301') startEnterClassroomWalk('room301', -6.8);
         else if (type === 'enter_302') startEnterClassroomWalk('room302', 6.8);
-        else if (type === 'exit_to_hallway1') startExitRoomWalk('hallway', lastExitedDoorX || -9.2);
-        else if (type === 'exit_to_hallway2') startExitRoomWalk('hallway2', lastExitedDoorX || -6.8);
-        else if (type === 'exit_to_hallway3') startExitRoomWalk('hallway3', lastExitedDoorX || -6.8);
+        else if (type === 'exit_to_hallway1') startExitRoomWalk('hallway', ROOM_DOOR_X[sceneMode] ?? -9.2);
+        else if (type === 'exit_to_hallway2') startExitRoomWalk('hallway2', ROOM_DOOR_X[sceneMode] ?? -6.8);
+        else if (type === 'exit_to_hallway3') startExitRoomWalk('hallway3', ROOM_DOOR_X[sceneMode] ?? -6.8);
         else if (type === 'stairs_up_2') startStairClimb('hallway2', true);
         else if (type === 'stairs_up_3') startStairClimb('hallway3', true);
         else if (type === 'stairs_down_2') startStairClimb('hallway2', false);
@@ -6741,7 +7945,7 @@
         else if (type === 'gift_teacher_101') triggerRoom101Gift();
         else if (type === 'gift_teacher_301') triggerRoom301Gift();
         else if (type === 'talk_decor_student') triggerTalkDecorStudent();
-        else if (type === 'chalkboard_wish') document.getElementById('chalkboard-modal').classList.remove('hidden');
+        else if (type === 'chalkboard_wish') openChalkboardModal();
         else if (type === 'room102_slide_touch') changeRoom102Slide(1);
         else if (type === 'open_wall_newspaper') document.getElementById('magazine-modal').classList.remove('hidden');
         else if (type === 'view_artwork') openArtworkViewer(hits[0].object.userData.artIndex || 0);
