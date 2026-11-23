@@ -1486,7 +1486,7 @@
           const petal=new THREE.Mesh(new THREE.SphereGeometry(0.029,8,6),petalMat);
           petal.scale.set(0.74,0.33,1.3);
           petal.position.set(Math.cos(a)*0.027,0.006,Math.sin(a)*0.027);
-          petal.rotation.y=a;
+          petal.rotation.y = Math.PI / 2 - a;
           petals.add(petal);
         }
         const center=new THREE.Mesh(new THREE.SphereGeometry(0.016,8,6),
@@ -1557,7 +1557,7 @@
         const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 10), i % 2 === 0 ? leafMat1 : leafMat2);
         leaf.scale.set(1.25, 0.32, 0.75);
         leaf.position.set(Math.cos(ang) * 0.18, 0.74 + (i % 3) * 0.1, Math.sin(ang) * 0.18);
-        leaf.rotation.y = ang;
+        leaf.rotation.y = -ang;
         group.add(leaf);
       }
       group.add(createContactShadow(0.3, 0.3, 0.28));
@@ -3750,21 +3750,41 @@
         );
       }
 
+      // Realistic ceiling fan: stationary ceiling canopy & downrod + spinning 3-blade rotor
+      const fanMetalMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.68, roughness: 0.32 });
+      const fanBodyMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.55, roughness: 0.35 });
+      const fanBladeMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.38, metalness: 0.12 });
+      const canopy = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 0.06, 16), fanMetalMat);
+      canopy.position.set(0, height - 0.03, 0);
+      const downrod = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.24, 10), fanMetalMat);
+      downrod.position.set(0, height - 0.16, 0);
+      targetGroup.add(canopy, downrod);
+
       const fanGroup = new THREE.Group();
-      fanGroup.position.set(0, height - 0.18, 0);
-      const hub = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.16, 0.16, 0.12, 12),
-        new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.7 })
-      );
-      fanGroup.add(hub);
+      fanGroup.position.set(0, height - 0.29, 0);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.095, 20), fanBodyMat);
+      const hubCap = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.11, 0.03, 16), fanMetalMat);
+      hubCap.position.y = -0.055;
+      fanGroup.add(hub, hubCap);
+
       for (let b = 0; b < 3; b++) {
-        const blade = new THREE.Mesh(
-          new THREE.BoxGeometry(1.35, 0.02, 0.14),
-          new THREE.MeshStandardMaterial({ color: 0xf8fafc })
-        );
-        blade.rotation.y = (b * Math.PI * 2) / 3;
-        blade.position.set(Math.cos((b * Math.PI * 2) / 3) * 0.65, 0, Math.sin((b * Math.PI * 2) / 3) * 0.65);
-        fanGroup.add(blade);
+        // Parent pivot guarantees each blade radiates strictly from the hub center (no sin-sign skew)
+        const bladePivot = new THREE.Group();
+        bladePivot.rotation.y = (b * Math.PI * 2) / 3;
+
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.016, 0.045), fanMetalMat);
+        arm.position.set(0.19, 0.005, 0);
+
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.014, 0.135), fanBladeMat);
+        blade.position.set(0.58, 0.005, 0);
+        blade.rotation.x = 0.08;
+
+        const bladeTip = new THREE.Mesh(new THREE.CylinderGeometry(0.0675, 0.0675, 0.014, 14), fanBladeMat);
+        bladeTip.position.set(0.96, 0.005, 0);
+        bladeTip.rotation.x = 0.08;
+
+        bladePivot.add(arm, blade, bladeTip);
+        fanGroup.add(bladePivot);
       }
       targetGroup.add(fanGroup);
       ceilingFans.push(fanGroup);
