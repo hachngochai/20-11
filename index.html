@@ -2,14 +2,17 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#090d16" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Thế Giới 3D Tri Ân Ngày Nhà Giáo Việt Nam 20/11</title>
-  <meta name="app-version" content="10.0.2" />
+  <meta name="app-version" content="10.0.3" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-  <link rel="stylesheet" href="style.css?v=10.0.2" />
+  <link rel="stylesheet" href="style.css?v=10.0.3" />
 </head>
 <body>
   <div id="canvas-container"></div>
@@ -39,32 +42,58 @@
   <!-- Main HUD -->
   <div id="main-ui" class="fixed inset-0 z-20 pointer-events-none flex flex-col justify-between p-3 sm:p-4 opacity-0 transition-opacity duration-500">
     <!-- Top Bar: Back Button + Compact Scene Title + Graphics & POV Toggle -->
-    <div class="flex items-center justify-between gap-2">
-      <div class="flex items-center gap-2 min-w-0">
-        <button id="btn-back" type="button" class="hidden pointer-events-auto glass-panel hover:bg-slate-800/90 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition active:scale-95 shrink-0">
-          <span>← Quay Lại</span>
-        </button>
-        <div id="scene-location-pill" class="glass-panel rounded-xl px-3 py-2 text-xs font-bold text-amber-200 border border-amber-300/25 truncate max-w-[42vw] sm:max-w-xs">
-          <strong id="ui-scene-title" class="font-bold">Khuôn Viên Tri Ân 20/11</strong>
+    <div id="hud-top-stack" class="flex flex-col gap-1.5 w-full">
+      <div id="hud-top-row" class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <button id="btn-back" type="button" class="hidden pointer-events-auto glass-panel hover:bg-slate-800/90 text-white font-bold px-3 sm:px-3.5 py-2 rounded-xl text-xs flex items-center gap-1 transition active:scale-95 shrink-0">
+            <span>←</span>
+            <span class="back-label">Quay Lại</span>
+          </button>
+          <div id="scene-location-pill" class="glass-panel rounded-xl px-3 py-2 text-xs font-bold text-amber-200 border border-amber-300/25 truncate max-w-[42vw] sm:max-w-xs">
+            <strong id="ui-scene-title" class="font-bold">Khuôn Viên Tri Ân 20/11</strong>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button id="btn-toggle-gfx" type="button" class="pointer-events-auto glass-panel hover:bg-slate-800/90 text-emerald-300 border border-emerald-400/40 font-bold px-2.5 py-2 rounded-xl text-xs flex items-center gap-1 transition active:scale-95">
+            <span>✨</span>
+            <span id="gfx-toggle-label">Ultra</span>
+          </button>
+          <div class="cam-mode-switch pointer-events-auto glass-panel rounded-xl" role="group" aria-label="Chọn camera">
+            <button id="btn-camera-overview" type="button" aria-pressed="true" class="camera-active" title="Máy quay toàn cảnh độc lập">🎥 <span class="cam-label">Toàn cảnh</span></button>
+            <button id="btn-camera-donor" type="button" aria-pressed="false" title="Camera đặt ở mắt học sinh tặng hoa">👁 <span class="cam-label">Người tặng</span></button>
+          </div>
+          <button id="btn-audio-toggle" type="button" aria-pressed="true" aria-label="Bật hoặc tắt âm thanh" class="pointer-events-auto glass-panel audio-button rounded-xl text-xs font-bold px-2.5 sm:px-3 py-2 text-sky-200 transition active:scale-95 flex items-center gap-1">
+            <span id="audio-icon">🔊</span>
+            <span id="audio-label">Âm thanh</span>
+          </button>
         </div>
       </div>
+      <!-- Compact mobile location pill (visible on small screens so top controls never crowd) -->
+      <div id="mobile-location-bar" class="self-start glass-panel rounded-full px-3 py-1 text-[11px] font-bold text-amber-200 border border-amber-300/25 max-w-[85vw] truncate">
+        <span id="mobile-scene-title">Khuôn Viên Tri Ân 20/11</span>
+      </div>
+    </div>
 
-      <div class="flex items-center gap-1.5 shrink-0">
-        <button id="btn-toggle-gfx" type="button" class="pointer-events-auto glass-panel hover:bg-slate-800/90 text-emerald-300 border border-emerald-400/40 font-bold px-2.5 py-2 rounded-xl text-xs flex items-center gap-1 transition active:scale-95">
-          <span>✨</span>
-          <span id="gfx-toggle-label">Ultra</span>
-        </button>
-        <div class="cam-mode-switch pointer-events-auto glass-panel rounded-xl" role="group" aria-label="Chọn camera">
-          <button id="btn-camera-overview" type="button" aria-pressed="true" class="camera-active" title="Máy quay toàn cảnh độc lập">🎥 Toàn cảnh</button>
-          <button id="btn-camera-donor" type="button" aria-pressed="false" title="Camera đặt ở mắt học sinh tặng hoa">👁 Người tặng</button>
+    <!-- Mobile Touch Movement Controls (Joystick + discreet 3rd-person toggle) -->
+    <div id="mobile-touch-controls" class="hidden pointer-events-none">
+      <button id="btn-toggle-joystick" type="button" aria-label="Bật hoặc tắt cần điều khiển di chuyển" title="Cần di chuyển cảm ứng" class="pointer-events-auto glass-panel text-amber-200 border border-amber-400/35 rounded-full flex items-center justify-center transition active:scale-90">
+        🕹️
+      </button>
+      <div id="mobile-joystick-wrap" class="hidden pointer-events-auto" aria-label="Cần di chuyển cảm ứng">
+        <div id="mobile-joystick-base">
+          <div class="joy-dir joy-up">▲</div>
+          <div class="joy-dir joy-down">▼</div>
+          <div class="joy-dir joy-left">◀</div>
+          <div class="joy-dir joy-right">▶</div>
+          <div id="mobile-joystick-knob"></div>
         </div>
-        <button id="btn-audio-toggle" type="button" aria-pressed="true" class="pointer-events-auto glass-panel audio-button rounded-xl text-xs font-bold px-3 py-2 text-sky-200 transition active:scale-95">🔊 Âm thanh</button>
       </div>
     </div>
 
     <!-- Clean Direct Action Bar at Bottom -->
-    <div class="flex flex-col items-center gap-1.5 w-full max-w-5xl mx-auto">
-      <div id="pov-controls-hint" class="hidden glass-panel rounded-full px-3.5 py-1 text-[11px] text-amber-100/90 border border-amber-400/25">
+    <div id="hud-bottom-bar" class="flex flex-col items-center gap-1.5 w-full max-w-5xl mx-auto">
+      <div id="pov-controls-hint" class="hidden glass-panel rounded-full px-3.5 py-1 text-[11px] text-amber-100/90 border border-amber-400/25 text-center">
         WASD / Phím mũi tên: Di chuyển • Shift: Chạy • Kéo chuột: Nhìn quanh 360°
       </div>
       <div id="classroom-controls" class="hidden pointer-events-auto flex flex-wrap justify-center gap-1.5"></div>
@@ -310,40 +339,40 @@
   </div>
 
   <!-- Photo Zoom Modal (Room 301) -->
-  <div id="photo-zoom-modal" class="app-modal hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="modal-pop glass-panel rounded-3xl max-w-xl w-full p-5 text-white border border-amber-400/40">
-      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+  <div id="photo-zoom-modal" class="app-modal hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-xl w-full p-4 sm:p-5 text-white border border-amber-400/40 max-h-[90dvh] overflow-y-auto">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 pb-3 mb-3">
         <span id="photo-zoom-title" class="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-amber-300">Kỷ Niệm Thầy Trò</span>
-        <div class="flex items-center gap-1.5">
-          <button id="btn-zoom-out" type="button" class="bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-lg text-xs font-bold">−</button>
+        <div class="flex items-center gap-1.5 ml-auto">
+          <button id="btn-zoom-out" type="button" class="bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-lg text-xs font-bold">−</button>
           <span id="photo-zoom-badge" class="text-xs font-bold text-amber-300 px-1.5">100%</span>
-          <button id="btn-zoom-in" type="button" class="bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-lg text-xs font-bold">+</button>
-          <button id="btn-zoom-reset" type="button" class="bg-white/10 hover:bg-white/20 px-2 py-1 rounded-lg text-[11px] font-semibold">1:1</button>
-          <button id="btn-close-photo-zoom" type="button" class="text-slate-300 hover:text-white text-lg font-bold pl-2">✕</button>
+          <button id="btn-zoom-in" type="button" class="bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-lg text-xs font-bold">+</button>
+          <button id="btn-zoom-reset" type="button" class="bg-white/10 hover:bg-white/20 px-2 py-1.5 rounded-lg text-[11px] font-semibold">1:1</button>
+          <button id="btn-close-photo-zoom" type="button" class="text-slate-300 hover:text-white text-lg font-bold pl-1.5">✕</button>
         </div>
       </div>
-      <div class="overflow-hidden rounded-2xl border border-amber-400/30 bg-slate-900 flex items-center justify-center h-64">
+      <div class="overflow-hidden rounded-2xl border border-amber-400/30 bg-slate-900 flex items-center justify-center h-52 sm:h-64">
         <img id="photo-zoom-img" alt="Ảnh Kỷ Niệm 301" class="photo-zoom-img w-full h-full object-contain" />
       </div>
       <p id="photo-zoom-desc" class="text-xs sm:text-sm text-slate-200 leading-relaxed mt-3"></p>
       <div class="flex gap-2 mt-4">
         <button id="btn-prev-photo301" type="button" class="bg-white/10 hover:bg-white/20 text-white px-3 py-2.5 rounded-xl text-xs font-bold">←</button>
         <button id="btn-voice-photo" type="button" class="flex-1 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-200 py-2.5 rounded-xl text-xs font-bold">🔊 Nghe Thuyết Minh</button>
-        <button id="btn-ok-photo-zoom" type="button" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold">Đóng Khung Ảnh</button>
+        <button id="btn-ok-photo-zoom" type="button" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 py-2.5 rounded-xl text-xs font-extrabold">Đóng</button>
         <button id="btn-next-photo301" type="button" class="bg-white/10 hover:bg-white/20 text-white px-3 py-2.5 rounded-xl text-xs font-bold">→</button>
       </div>
     </div>
   </div>
 
   <!-- Tribute Tree Wish Card Modal (Room 302) -->
-  <div id="tribute-tree-modal" class="app-modal hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="modal-pop glass-panel rounded-3xl max-w-2xl w-full p-5 sm:p-6 text-white border border-rose-400/40 max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between border-b border-white/15 pb-3 mb-3">
+  <div id="tribute-tree-modal" class="app-modal hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+    <div class="modal-pop glass-panel rounded-3xl max-w-2xl w-full p-4 sm:p-6 text-white border border-rose-400/40 max-h-[90dvh] overflow-y-auto">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 pb-3 mb-3">
         <div>
           <span class="text-xs font-extrabold uppercase tracking-wider text-amber-300">🌳 Vườn Cây Tri Ân 302 • Lưu Chung Qua Link</span>
           <div id="tribute-quota-badge" class="text-[11px] text-rose-300 font-semibold mt-0.5">🎁 Miễn phí: 2/2 thiệp</div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 ml-auto">
           <button id="btn-copy-share-link" type="button" class="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-200 px-3 py-1.5 rounded-xl text-xs font-bold">🔗 Copy Link</button>
           <button id="btn-close-tribute-modal" type="button" class="text-slate-300 hover:text-white text-lg font-bold px-2">✕</button>
         </div>
@@ -376,6 +405,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=10.0.2"></script>
+  <script src="script.js?v=10.0.3"></script>
 </body>
 </html>

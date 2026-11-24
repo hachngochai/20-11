@@ -203,8 +203,14 @@
     let fpYaw = Math.PI;
     let fpPitch = -0.04;
     let isPointerDragging = false;
+    let activeLookPointerId = null;
+    let lastPointerType = 'mouse';
     let lastPointerX = 0;
     let lastPointerY = 0;
+    const isTouchCapable = () => ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || !!window.matchMedia?.('(pointer: coarse)').matches;
+    const isMobileViewport = () => window.innerWidth <= 768 || Math.min(window.innerWidth, window.innerHeight) < 680;
+    const mobileJoy = { x: 0, y: 0, active: false, pointerId: null };
+    let mobileJoyManual = false;
 
     let interactiveList = [];
     let lastExitedDoorX = 0;
@@ -225,7 +231,7 @@
     let campusGardenBeds = [];
     let campusClouds = [];
     let campusWaterRipples = [];
-    let graphicsUltra = true;
+    let graphicsUltra = !(isTouchCapable() && isMobileViewport());
     let atmosphereMotes = null;
     let skyShaderUniforms = null;
     let outdoorEnvTexture = null;
@@ -697,7 +703,11 @@
       const g=room101GiftAnim || room301GiftAnim;
       const reach=g ? smooth01((g.progress-0.48)/0.25)*(1-smooth01((g.progress-0.78)/0.15)) : 0;
       const step=roomHero.userData.walkBlend||0;
-      povHands.position.set(0, reach*0.11+Math.sin(elapsed*8)*0.006*step, -reach*0.19);
+      const narrowPortrait = (window.innerWidth / Math.max(1, window.innerHeight)) < 0.75;
+      const handScale = narrowPortrait ? 0.72 : 1.0;
+      const yOffset = narrowPortrait ? -0.15 : 0;
+      povHands.scale.setScalar(handScale);
+      povHands.position.set(0, yOffset + reach*0.11+Math.sin(elapsed*8)*0.006*step, -reach*0.19);
       if(povBouquet) povBouquet.visible=!!roomHero.userData.bouquetMesh?.visible;
     }
 
@@ -748,6 +758,53 @@
     function updateHeaderStatus(title) {
       const el = document.getElementById('ui-scene-title');
       if (el) el.textContent = title;
+      const mob = document.getElementById('mobile-scene-title');
+      if (mob) mob.textContent = title;
+    }
+
+    function resetMobileJoystick() {
+      mobileJoy.x = 0;
+      mobileJoy.y = 0;
+      mobileJoy.active = false;
+      mobileJoy.pointerId = null;
+      const knob = document.getElementById('mobile-joystick-knob');
+      if (knob) knob.style.transform = 'translate3d(0px, 0px, 0px)';
+    }
+
+    function updateMobileControlsVisibility() {
+      const wrap = document.getElementById('mobile-touch-controls');
+      const joyWrap = document.getElementById('mobile-joystick-wrap');
+      const toggleBtn = document.getElementById('btn-toggle-joystick');
+      if (!wrap || !joyWrap || !toggleBtn) return;
+      const indoors = sceneMode !== 'intro' && sceneMode !== 'campus';
+      const showMobileUI = indoors && (isTouchCapable() || isMobileViewport());
+      wrap.classList.toggle('hidden', !showMobileUI);
+      if (!showMobileUI) {
+        resetMobileJoystick();
+        return;
+      }
+      if (isFirstPersonPOV) {
+        toggleBtn.classList.add('hidden');
+        joyWrap.classList.remove('hidden');
+      } else {
+        toggleBtn.classList.remove('hidden');
+        toggleBtn.classList.toggle('joy-active', mobileJoyManual);
+        joyWrap.classList.toggle('hidden', !mobileJoyManual);
+        if (!mobileJoyManual) resetMobileJoystick();
+      }
+    }
+
+    function updateResponsiveCameraFOV() {
+      if (!camera) return;
+      const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+      const baseFov = isFirstPersonPOV ? 60 : 54;
+      const portraitBoost = aspect < 1.0 ? THREE.MathUtils.clamp((1.0 - aspect) * 32, 0, 18) : 0;
+      const nextFov = Math.round((baseFov + portraitBoost) * 10) / 10;
+      if (Math.abs(camera.fov - nextFov) > 0.1 || Math.abs(camera.aspect - aspect) > 0.001) {
+        camera.aspect = aspect;
+        camera.fov = nextFov;
+        camera.updateProjectionMatrix();
+      }
     }
 
     function updatePOVButtonUI() {
@@ -756,8 +813,18 @@
       const hint = document.getElementById('pov-controls-hint');
       if (whole) { whole.classList.toggle('camera-active', !isFirstPersonPOV); whole.setAttribute('aria-pressed', String(!isFirstPersonPOV)); }
       if (pov) { pov.classList.toggle('camera-active', isFirstPersonPOV); pov.setAttribute('aria-pressed', String(isFirstPersonPOV)); }
-      if (hint) hint.classList.toggle('hidden', !(isFirstPersonPOV && sceneMode !== 'campus' && sceneMode !== 'intro'));
+      if (hint) {
+        const showHint = isFirstPersonPOV && sceneMode !== 'campus' && sceneMode !== 'intro';
+        hint.classList.toggle('hidden', !showHint);
+        if (showHint) {
+          hint.textContent = (isTouchCapable() || isMobileViewport())
+            ? '🕹️ Kéo vòng trái để đi • Vuốt màn hình để nhìn 360°'
+            : 'WASD / Phím mũi tên: Di chuyển • Shift: Chạy • Kéo chuột: Nhìn quanh 360°';
+        }
+      }
       if (roomHero && sceneMode !== 'campus' && sceneMode !== 'intro') roomHero.visible = !isFirstPersonPOV;
+      updateResponsiveCameraFOV();
+      updateMobileControlsVisibility();
     }
 
     function setClassroomControls(items) {
@@ -2397,14 +2464,14 @@
     function initFloatingPetals() {
       const petalGeo = new THREE.PlaneGeometry(0.14, 0.1);
       const colors = [0xfda4af, 0xfef08a, 0xfbcfe8, 0xffffff];
+      const sharedMats = colors.map((col) => new THREE.MeshBasicMaterial({
+        color: col,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.85
+      }));
       for (let i = 0; i < 65; i++) {
-        const mat = new THREE.MeshBasicMaterial({
-          color: colors[i % colors.length],
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.85
-        });
-        const mesh = new THREE.Mesh(petalGeo, mat);
+        const mesh = new THREE.Mesh(petalGeo, sharedMats[i % sharedMats.length]);
         mesh.position.set(
           (Math.random() - 0.5) * 44,
           1.2 + Math.random() * 14,
@@ -2415,6 +2482,7 @@
           swaySpeed: 1.2 + Math.random() * 1.5,
           phase: Math.random() * Math.PI * 2
         };
+        mesh.visible = i < ((isMobileViewport() && !graphicsUltra) ? 28 : 65);
         scene.add(mesh);
         floatingPetals.push(mesh);
       }
@@ -2782,36 +2850,40 @@
     function applyGraphicsQuality() {
       if(!renderer)return;
       const dpr=window.devicePixelRatio||1;
-      const mobile=Math.min(window.innerWidth,window.innerHeight)<680;
-      const target=graphicsUltra?(mobile?1.4:2.0):(mobile?1.0:1.15);
+      const mobile=isMobileViewport();
+      const target=graphicsUltra?(mobile?1.35:2.0):(mobile?1.15:1.15);
       renderer.setPixelRatio(Math.min(dpr,target));
       renderer.shadowMap.enabled=true;
       renderer.shadowMap.type=THREE.PCFSoftShadowMap;
       if(sunLight) {
-        const resolution=graphicsUltra?(mobile?2048:3072):1024;
+        const resolution=graphicsUltra?(mobile?1536:2048):1024;
         const sh=sunLight.shadow;
         if(sh.mapSize.x!==resolution){
           sh.mapSize.set(resolution,resolution);
           if(sh.map){sh.map.dispose();sh.map=null;}
           renderer.shadowMap.needsUpdate=true;
         }
-        sh.radius=graphicsUltra?1.3:1.15;
+        sh.radius=graphicsUltra?1.3:1.05;
       }
-      // Prefer sharper oblique floor textures, with a bounded GPU budget.
+      // Prefer sharper oblique floor textures, with a bounded GPU budget on mobile.
       const maxAniso=renderer.capabilities?.getMaxAnisotropy?.()||4;
-      const factor=Math.min(maxAniso,graphicsUltra?16:6);
+      const factor=Math.min(maxAniso,graphicsUltra?(mobile?8:16):(mobile?4:6));
       Object.values(TEXTURE_CACHE).forEach(tex=>{
         if(tex?.isTexture && tex.anisotropy!==factor){
           tex.anisotropy=factor;tex.needsUpdate=true;
         }
       });
+      const maxPetals = (mobile && !graphicsUltra) ? 28 : 65;
+      floatingPetals.forEach((p, idx) => { p.visible = idx < maxPetals; });
       if(scene)scene.traverse(obj=>{
         if(obj.userData?.cinematicOnly)obj.visible=graphicsUltra;
       });
+      const lbl=document.getElementById('gfx-toggle-label');
+      if(lbl)lbl.textContent=graphicsUltra?'Ultra':(mobile?'Mượt':'Cao');
       const btn=document.getElementById('btn-toggle-gfx');
       if(btn)btn.title=graphicsUltra
         ? 'Ultra: sắc nét hơn, bóng đổ chi tiết và vật liệu PBR'
-        : 'Tối ưu: độ phân giải và bóng đổ nhẹ cho thiết bị yếu';
+        : 'Tối ưu: độ phân giải và bóng đổ nhẹ cho điện thoại / thiết bị yếu';
       if(sceneMode)configureLightingForMode(sceneMode);
     }
 
@@ -5959,19 +6031,23 @@
         controls.enablePan = false;
         controls.enableZoom = true;
         controls.minDistance = 2.0;
-        controls.maxDistance = sceneMode.startsWith('hallway') ? 8.5 : Math.max(6.2, activeRoomSpec.depth * 0.58);
+        const portrait = window.innerHeight > window.innerWidth * 1.15;
+        controls.maxDistance = sceneMode.startsWith('hallway')
+          ? (portrait ? 9.5 : 8.5)
+          : Math.max(portrait ? 7.2 : 6.2, activeRoomSpec.depth * (portrait ? 0.66 : 0.58));
         controls.minPolarAngle = 0.12;
         controls.maxPolarAngle = Math.PI * 0.47;
         if (!preservePose || cameraState.overviewScene !== sceneMode) {
           const hall = sceneMode.startsWith('hallway');
           if (hall) {
-            const camX = THREE.MathUtils.clamp(roomHero.position.x - 1.55, -10.5, 9.5);
-            const tgtX = THREE.MathUtils.clamp(roomHero.position.x - 0.85, -9.5, 9.5);
-            cameraState.overview.position.set(camX, 2.52, 3.18);
-            cameraState.overview.target.set(tgtX, 1.48, -2.25);
+            const camX = THREE.MathUtils.clamp(roomHero.position.x - (portrait ? 0 : 1.55), -10.5, 9.5);
+            const tgtX = THREE.MathUtils.clamp(roomHero.position.x - (portrait ? 0 : 0.85), -9.5, 9.5);
+            cameraState.overview.position.set(camX, portrait ? 2.58 : 2.52, portrait ? 3.30 : 3.18);
+            cameraState.overview.target.set(tgtX, portrait ? 1.52 : 1.48, -2.25);
           } else {
-            const camZ = sceneMode === 'room103' ? 5.15 : Math.min(activeRoomSpec.depth / 2 - 1.15, 6.2);
-            const camY = sceneMode === 'room201' ? 3.15 : 2.68;
+            const baseCamZ = sceneMode === 'room103' ? 5.15 : Math.min(activeRoomSpec.depth / 2 - 1.15, 6.2);
+            const camZ = portrait ? Math.min(activeRoomSpec.depth / 2 - 0.72, baseCamZ + 0.68) : baseCamZ;
+            const camY = sceneMode === 'room201' ? (portrait ? 3.35 : 3.15) : (portrait ? 2.82 : 2.68);
             cameraState.overview.position.set(0, camY, camZ);
             cameraState.overview.target.set(0, 1.48, -2.1);
           }
@@ -6029,6 +6105,7 @@
       hideSpeechCard();
       const tipEl = document.getElementById('hover-tooltip');
       if (tipEl) tipEl.classList.add('hidden');
+      updateMobileControlsVisibility();
 
       campusGroup.visible = mode === 'intro' || mode === 'campus';
       hallwayGroup.visible = mode === 'hallway';
@@ -6099,9 +6176,16 @@
         campusGroup.traverse((o) => {
           if (o.isMesh && o.userData && o.userData.interactiveType) interactiveList.push(o);
         });
-        // Elevated cinematic campus establishing shot: clears welcome gate roof so hero, scooter, fountain & both buildings shine!
-        camera.position.set(0, 16.8, 35.5);
-        controls.target.set(0, 2.6, 5.5);
+        // Elevated cinematic campus establishing shot: adapts smoothly for vertical mobile screens so both buildings fit cleanly!
+        const portraitCampus = window.innerHeight > window.innerWidth * 1.15;
+        if (portraitCampus) {
+          camera.position.set(0, 19.6, 44.5);
+          controls.target.set(0, 2.8, 4.5);
+        } else {
+          camera.position.set(0, 16.8, 35.5);
+          controls.target.set(0, 2.6, 5.5);
+        }
+        updateResponsiveCameraFOV();
         controls.update();
         return;
       }
@@ -6263,8 +6347,13 @@
         campusHero.position.set(outX, 0.14, -2.0);
         campusHero.rotation.y = side === 'female' ? -Math.PI / 2 : Math.PI / 2;
       }
-      camera.position.set(0, 15.8, 34.0);
-      controls.target.set(outX * 0.35, 2.6, 3.0);
+      if (window.innerHeight > window.innerWidth * 1.15) {
+        camera.position.set(0, 19.2, 43.0);
+        controls.target.set(outX * 0.25, 2.6, 3.2);
+      } else {
+        camera.position.set(0, 15.8, 34.0);
+        controls.target.set(outX * 0.35, 2.6, 3.0);
+      }
       controls.update();
       playChime(460, 0.15);
     }
@@ -7301,6 +7390,10 @@
 
     function animate() {
       requestAnimationFrame(animate);
+      if (document.hidden) {
+        if (clock) clock.getDelta();
+        return;
+      }
       const dt = Math.min(clock ? clock.getDelta() : 0.016, 0.05);
       const elapsed = clock ? clock.getElapsedTime() : 0;
 
@@ -7686,7 +7779,8 @@
           !document.querySelector('.fixed.inset-0.z-50:not(.hidden)');
         if (room201SeatedSeat) {
           heroVelocity.set(0, 0, 0);
-          if (canControl && (keysPressed.KeyW || keysPressed.KeyS || keysPressed.KeyA || keysPressed.KeyD ||
+          const joyPush = Math.hypot(mobileJoy.x, mobileJoy.y) > 0.35;
+          if (canControl && (joyPush || keysPressed.KeyW || keysPressed.KeyS || keysPressed.KeyA || keysPressed.KeyD ||
               keysPressed.ArrowUp || keysPressed.ArrowDown || keysPressed.ArrowLeft || keysPressed.ArrowRight)) {
             startStandFromRoom201();
           }
@@ -7697,9 +7791,13 @@
           if (keysPressed.KeyS || keysPressed.ArrowDown) az -= 1;
           if (keysPressed.KeyA || keysPressed.ArrowLeft) ax -= 1;
           if (keysPressed.KeyD || keysPressed.ArrowRight) ax += 1;
+          if (Math.abs(mobileJoy.x) > 0.08 || Math.abs(mobileJoy.y) > 0.08) {
+            ax += mobileJoy.x;
+            az += mobileJoy.y;
+          }
         }
         const length = Math.hypot(ax, az);
-        if (length > 0) { ax /= length; az /= length; }
+        if (length > 1) { ax /= length; az /= length; }
         let desiredX = 0, desiredZ = 0;
         if (isFirstPersonPOV) {
           // Right-handed Three.js basis: forward = (sin(yaw), cos(yaw)), right = (-cos(yaw), sin(yaw))
@@ -7823,7 +7921,60 @@
         keysPressed[e.code] = true;
       });
       window.addEventListener('keyup', e => { keysPressed[e.code]=false; });
-      window.addEventListener('blur',()=>{Object.keys(keysPressed).forEach(k=>keysPressed[k]=false);isPointerDragging=false;});
+      window.addEventListener('blur',()=>{Object.keys(keysPressed).forEach(k=>keysPressed[k]=false);isPointerDragging=false;activeLookPointerId=null;resetMobileJoystick();});
+
+      // Mobile Virtual Analog Joystick (supports simultaneous dual-thumb walk + look)
+      const joyToggleBtn = document.getElementById('btn-toggle-joystick');
+      if (joyToggleBtn) {
+        joyToggleBtn.addEventListener('click', () => {
+          mobileJoyManual = !mobileJoyManual;
+          updateMobileControlsVisibility();
+          playChime(mobileJoyManual ? 640 : 480, 0.10);
+        });
+      }
+      const joyBase = document.getElementById('mobile-joystick-base');
+      const joyKnob = document.getElementById('mobile-joystick-knob');
+      if (joyBase && joyKnob) {
+        const updateJoystickFromEvent = (e) => {
+          const rect = joyBase.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const maxR = rect.width * 0.36;
+          let dx = e.clientX - cx;
+          let dy = e.clientY - cy;
+          const dist = Math.hypot(dx, dy);
+          if (dist > maxR && dist > 0.001) {
+            dx = (dx / dist) * maxR;
+            dy = (dy / dist) * maxR;
+          }
+          mobileJoy.x = THREE.MathUtils.clamp(dx / maxR, -1, 1);
+          mobileJoy.y = THREE.MathUtils.clamp(-dy / maxR, -1, 1); // Up on screen = forward (+az)
+          joyKnob.style.transform = `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0px)`;
+        };
+        joyBase.addEventListener('pointerdown', (e) => {
+          if (mobileJoy.pointerId !== null) return;
+          mobileJoy.pointerId = e.pointerId;
+          mobileJoy.active = true;
+          joyBase.setPointerCapture?.(e.pointerId);
+          updateJoystickFromEvent(e);
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        joyBase.addEventListener('pointermove', (e) => {
+          if (e.pointerId !== mobileJoy.pointerId) return;
+          updateJoystickFromEvent(e);
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        const endJoy = (e) => {
+          if (e.pointerId !== mobileJoy.pointerId) return;
+          resetMobileJoystick();
+          e.preventDefault();
+          e.stopPropagation();
+        };
+        joyBase.addEventListener('pointerup', endJoy);
+        joyBase.addEventListener('pointercancel', endJoy);
+      }
 
       // Capture slide gestures BEFORE OrbitControls / first-person drag.
       // Dragging a real 3D board never rotates the camera or opens a popup.
@@ -7853,13 +8004,18 @@
       // Track pointerdown coordinates so camera orbit drags never misfire as 3D clicks
       let pointerDownX = 0, pointerDownY = 0, pointerMovedDist = 0;
       renderer.domElement.addEventListener('pointerdown', (e) => {
-        isPointerDragging = true;
-        pointerDownX = e.clientX;
-        pointerDownY = e.clientY;
-        pointerMovedDist = 0;
-        lastPointerX = e.clientX;
-        lastPointerY = e.clientY;
-        if (isFirstPersonPOV) renderer.domElement.setPointerCapture?.(e.pointerId);
+        if (mobileJoy.pointerId !== null && e.pointerId === mobileJoy.pointerId) return;
+        lastPointerType = e.pointerType || 'mouse';
+        if (activeLookPointerId === null) {
+          activeLookPointerId = e.pointerId;
+          isPointerDragging = true;
+          pointerDownX = e.clientX;
+          pointerDownY = e.clientY;
+          pointerMovedDist = 0;
+          lastPointerX = e.clientX;
+          lastPointerY = e.clientY;
+          if (isFirstPersonPOV) renderer.domElement.setPointerCapture?.(e.pointerId);
+        }
       });
 
       const INTERACTION_LABELS = {
@@ -7913,19 +8069,22 @@
           e.preventDefault();
           return;
         }
-        if (isPointerDragging) {
+        if (isPointerDragging && (activeLookPointerId === null || e.pointerId === activeLookPointerId)) {
           const dx = e.clientX - lastPointerX;
           const dy = e.clientY - lastPointerY;
           pointerMovedDist = Math.max(pointerMovedDist, Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY));
           lastPointerX = e.clientX;
           lastPointerY = e.clientY;
           if (isFirstPersonPOV && sceneMode !== 'intro' && sceneMode !== 'campus') {
-            fpYaw -= dx * 0.0045;
-            fpPitch = THREE.MathUtils.clamp(fpPitch - dy * 0.0035, -0.75, 0.75);
+            const lookSens = e.pointerType === 'touch' ? 0.0062 : 0.0045;
+            fpYaw -= dx * lookSens;
+            fpPitch = THREE.MathUtils.clamp(fpPitch - dy * (lookSens * 0.78), -0.75, 0.75);
           }
           if (hoverTooltip) hoverTooltip.classList.add('hidden');
           return;
         }
+        // Never show desktop hover tooltips on touch pointers
+        if (e.pointerType === 'touch' || isPointerDragging) return;
         // Lightweight throttled 3D hover tooltip & cursor feedback
         const now = performance.now();
         if (now - lastHoverCheck < 45 || sceneMode === 'intro' || activeTransition() ||
@@ -7975,7 +8134,10 @@
           slideIgnoreClickUntil = performance.now() + 500;
           e.preventDefault();
         }
-        isPointerDragging = false;
+        if (activeLookPointerId === null || e.pointerId === activeLookPointerId) {
+          activeLookPointerId = null;
+          isPointerDragging = false;
+        }
       });
       window.addEventListener('pointercancel', (e) => {
         if (room102SlidePointer && room102SlidePointer.id === e.pointerId) {
@@ -7984,7 +8146,10 @@
           room102SlidePointer = null;
           changeRoom102Slide(0, offset);
         }
-        isPointerDragging = false;
+        if (activeLookPointerId === null || e.pointerId === activeLookPointerId) {
+          activeLookPointerId = null;
+          isPointerDragging = false;
+        }
       });
 
       const backBtn = document.getElementById('btn-back');
@@ -8034,7 +8199,11 @@
       const audioBtn = document.getElementById('btn-audio-toggle');
       if (audioBtn) audioBtn.addEventListener('click', () => {
         audioEnabled = !audioEnabled;
-        audioBtn.textContent = audioEnabled ? '🔊 Âm thanh' : '🔇 Tắt tiếng';
+        const iconEl = document.getElementById('audio-icon');
+        const labelEl = document.getElementById('audio-label');
+        if (iconEl) iconEl.textContent = audioEnabled ? '🔊' : '🔇';
+        if (labelEl) labelEl.textContent = audioEnabled ? 'Âm thanh' : 'Tắt tiếng';
+        if (!iconEl && !labelEl) audioBtn.textContent = audioEnabled ? '🔊 Âm thanh' : '🔇 Tắt tiếng';
         audioBtn.setAttribute('aria-pressed', String(audioEnabled));
         if (!audioEnabled && 'speechSynthesis' in window) {
           window.speechSynthesis.cancel();
@@ -8442,7 +8611,8 @@
       const pointer = new THREE.Vector2();
       renderer.domElement.addEventListener('click', (e) => {
         if (performance.now() < slideIgnoreClickUntil) return;
-        if (pointerMovedDist > 6) return; // Ignore orbit-camera drags
+        const tapSlop = lastPointerType === 'touch' ? 16 : 6;
+        if (pointerMovedDist > tapSlop) return; // Ignore orbit-camera drags while keeping mobile taps responsive
         if (sceneMode === 'intro' || activeTransition()) return;
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -8497,6 +8667,7 @@
       clock = new THREE.Clock();
 
       camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.12, 240);
+      updateResponsiveCameraFOV();
       camera.position.set(0, 12.5, 34);
 
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -8517,8 +8688,12 @@
 
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
-      controls.dampingFactor = 0.07;
+      controls.dampingFactor = 0.08;
+      controls.rotateSpeed = isMobileViewport() ? 0.72 : 1.0;
       controls.maxPolarAngle = Math.PI * 0.49;
+      if (THREE.TOUCH) {
+        controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+      }
 
       hemiLight = new THREE.HemisphereLight(0xe0f2fe, 0x365314, 0.62);
       scene.add(hemiLight);
@@ -8558,11 +8733,17 @@
       bindUIEvents();
       updatePOVButtonUI();
 
-      window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
+      const handleViewportResize = () => {
+        updateResponsiveCameraFOV();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        if (controls) controls.rotateSpeed = isMobileViewport() ? 0.72 : 1.0;
         applyGraphicsQuality();
+        updateMobileControlsVisibility();
+      };
+      window.addEventListener('resize', handleViewportResize);
+      window.addEventListener('orientationchange', () => {
+        handleViewportResize();
+        setTimeout(handleViewportResize, 200);
       });
 
       switchSceneMode('intro');
